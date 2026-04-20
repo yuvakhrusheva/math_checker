@@ -21,6 +21,7 @@ The implementation consists of five layers: UI (Streamlit screens), orchestratio
 - **`pages/criteria_management.py`** — Criteria Management screen (file upload, validation, loaded combinations grid)
 - **`pages/main.py`** — Main screen (cohort queue table, Add Cohort form, Start Processing button, progress display, error list)
 - **`pages/review_panel.py`** — Review Panel screen (uncertain students, page images, answer correction)
+- **`pages/export.py`** — Export screen (Export button, file download, error list for unreadable/error students)
 - **`src/db.py`** — SQLite schema (DDL) + all CRUD operations for cohorts, students, task_results
 - **`src/drive.py`** — Google Drive API v3: authenticate via service account, list PDFs in a folder, download to local `data/downloads/`
 - **`src/pdf_processor.py`** — PyMuPDF: open PDF, convert each page to base64 JPEG image list
@@ -156,7 +157,8 @@ CREATE TABLE task_results (
     max_score REAL NOT NULL,
     confidence TEXT NOT NULL CHECK(confidence IN ('low', 'high')),
     grading_notes TEXT,
-    manually_corrected INTEGER NOT NULL DEFAULT 0  -- boolean
+    manually_corrected INTEGER NOT NULL DEFAULT 0,  -- boolean
+    UNIQUE(student_id, task_number)
 );
 ```
 
@@ -265,7 +267,7 @@ File naming: `criteria/grade{2|3}_{ru|az}_v{1|2}.json`
 
 Use real Google Drive test account (`TEST_GDRIVE_FOLDER_ID` env var) with a folder containing 5 sample PDFs (3 processable with known expected LLM outputs, 1 returning `confidence=low` on ≥1 task, 1 unreadable):
 - **Full pipeline test**: add cohort → start processing → verify all 5 students in SQLite with correct statuses (`processed`, `requires_review`, `unreadable`). Assert that the 3 processable students have task_results rows with non-null scores. Assert that the LLM was actually called (not mocked) by checking recognized_answer is populated from the real scan.
-- **Resumability test**: process 3/5 students, interrupt (kill thread), re-run → only remaining 2 students are processed; verify existing 3 rows are unchanged (no duplicate task_results rows, no extra LLM calls).
+- **Resumability test**: pre-seed 3 students as `processed` with existing task_results in SQLite, then run processing on the full cohort of 5 → verify only the 2 non-processed students are sent to the LLM; verify the 3 pre-seeded rows are unchanged (no duplicate task_results rows due to UNIQUE constraint).
 - **Drive download test**: `drive.py` lists exactly the PDFs in test folder, downloaded file sizes match Drive metadata.
 
 ### E2E tests
@@ -278,7 +280,7 @@ None — replaced by manual validation run on last year's test data (≤3% devia
 
 ### Verification approach
 
-Per-task smoke checks verify external integrations immediately after implementation. Integration tests cover the full pipeline on real Drive data. No Streamlit UI automation — UI verified manually by user.
+Per-task smoke checks verify external integrations immediately after implementation. Integration tests cover the full pipeline on real Drive data. No Streamlit UI automation — UI verified manually by user via the Verify-user steps in each task. The user-spec verification table mentions "Playwright / Streamlit test" for steps 1–2 — this is superseded by manual operator verification (Verify-user) as there are no Playwright tests in this project (E2E tests excluded per user-spec "Тестирование" section).
 
 ### Tools required
 - `pytest` — unit and integration test runner
@@ -320,11 +322,11 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 ### Wave 1 — Infrastructure (solo)
 
 #### Task 1: Project infrastructure
-- **Description:** Set up the full project skeleton: `requirements.txt`, `config/settings.json`, `.env.example`, folder structure (`src/`, `criteria/`, `data/`, `tests/unit/`, `tests/integration/`, `tests/fixtures/llm_responses/`, `pages/`), pre-commit hooks (gitleaks), and `pytest.ini`. This is the foundation every other task depends on.
+- **Description:** Set up the full project skeleton: `requirements.txt`, `config/settings.json`, `.env.example`, folder structure (`src/`, `criteria/`, `data/`, `tests/unit/`, `tests/integration/`, `tests/fixtures/llm_responses/`, `pages/`), pre-commit hooks (gitleaks), and `pytest.ini`. The `.env.example` must document that `GOOGLE_SERVICE_ACCOUNT_JSON` must be an absolute path to a key file outside the repo root. The app startup (`init_db()` call in `app.py`) must validate at launch that this env var points to an absolute path and that the file exists — fail fast with a clear error if not set or invalid.
 - **Skill:** infrastructure-setup
 - **Reviewers:** code-reviewer, security-auditor, infrastructure-reviewer
 - **Verify-smoke:** `pip install -r requirements.txt && python -c "import streamlit, litellm, fitz, google.oauth2; print('OK')"` → OK
-- **Files to modify:** `requirements.txt`, `config/settings.json`, `.env.example`, `.gitignore`, `pytest.ini`
+- **Files to modify:** `requirements.txt`, `config/settings.json`, `.env.example`, `.gitignore`, `pytest.ini`, `app.py`
 - **Files to read:** `work/core-app/tech-spec.md` (Architecture, Dependencies sections)
 
 ### Wave 2 — Core Services (parallel, depends on Wave 1)
@@ -338,7 +340,7 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 - **Files to read:** `work/core-app/tech-spec.md` (Data Models section)
 
 #### Task 3: Criteria JSON schema and sample files
-- **Description:** Implement `src/criteria_loader.py` with load/validate/list-available functions. When loading an uploaded criteria file, validate both the filename format (`grade{2|3}_{ru|az}_v{1|2}.json`) AND that internal `grade`/`language`/`variant` fields match the filename — reject with clear error if mismatched. Resolve the write path to `criteria/` and verify it stays within that directory (prevent path traversal). Create the 4 initially-available criteria files (`grade2_ru_v1.json`, `grade2_ru_v2.json`, `grade3_ru_v1.json`, `grade3_ru_v2.json`) based on answer key documents provided by the operator before first use.
+- **Description:** Implement `src/criteria_loader.py` with load/validate/list-available functions. When loading an uploaded criteria file, validate both the filename format (`grade{2|3}_{ru|az}_v{1|2}.json`) AND that internal `grade`/`language`/`variant` fields match the filename — reject with clear error if mismatched. Ensure the resolved write path stays within the `criteria/` directory. The 4 initially-available criteria files (`grade2_ru_v1.json`, `grade2_ru_v2.json`, `grade3_ru_v1.json`, `grade3_ru_v2.json`) are to be created by the operator via the Criteria Management UI before first use — Task 3 only provides the loader/validator and schema, not the content.
 - **Skill:** code-writing
 - **Reviewers:** code-reviewer, security-auditor, test-reviewer
 - **Files to modify:** `src/criteria_loader.py`, `criteria/grade2_ru_v1.json`, `criteria/grade2_ru_v2.json`, `criteria/grade3_ru_v1.json`, `criteria/grade3_ru_v2.json`, `tests/unit/test_criteria_loader.py`
@@ -347,7 +349,7 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 ### Wave 3 — Processing Pipeline (parallel, depends on Wave 2)
 
 #### Task 4: Google Drive integration
-- **Description:** Implement `src/drive.py`: authenticate with service account using `drive.readonly` scope only (from `GOOGLE_SERVICE_ACCOUNT_JSON` env var path), extract folder ID from a GDrive URL, list all PDF files in the folder, and download PDFs to `data/downloads/{cohort_id}/`. Sanitize Drive-returned filenames before writing to disk (strip path separators, disallow traversal sequences). Log Drive download failures to `error_message` on the student record separately from LLM/grading errors (CA-14). Include retry with exponential backoff on 429 rate limit errors.
+- **Description:** Implement `src/drive.py`: authenticate with service account using `drive.readonly` scope only (from `GOOGLE_SERVICE_ACCOUNT_JSON` env var path), extract folder ID from a GDrive URL, list all PDF files in the folder, and download PDFs to `data/downloads/{cohort_id}/`. Drive-returned filenames must be sanitized before writing to disk to prevent path traversal. Drive download failures must be logged to `error_message` on the student record separately from LLM/grading errors (CA-14). Implement rate-limit resilience for large folder downloads.
 - **Skill:** code-writing
 - **Reviewers:** code-reviewer, security-auditor, test-reviewer
 - **Verify-smoke:** `python -c "from src.drive import get_service; svc=get_service(); print('Drive OK')"` → Drive OK (requires valid `.env`)
@@ -373,9 +375,9 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 ### Wave 4 — Orchestration and Criteria UI (parallel, depends on Wave 3)
 
 #### Task 7: Queue processor with background threading
-- **Description:** Implement `src/queue_processor.py`: a `ProcessingThread` class that dequeues pending cohorts from SQLite, runs the full pipeline (drive → pdf_processor → grader) for each student sequentially, and updates statuses in real time. Expose `start()`, `is_running()` functions for the UI to call. Sanitize LLM/Drive error messages before storing in `error_message` — strip any content resembling API keys or tokens (lines matching `sk-`, `AIza`, base64 blobs >50 chars).
+- **Description:** Implement `src/queue_processor.py`: a `ProcessingThread` class that dequeues pending cohorts from SQLite, runs the full pipeline (drive → pdf_processor → grader) for each student sequentially, and updates statuses in real time. Expose `start()`, `is_running()`, and `request_stop()` functions for the UI to call (the stop flag allows the integration test to simulate an interrupt without killing the process). LLM/Drive exception messages must be sanitized before writing to `students.error_message` to prevent API key or token leakage into the DB and UI.
 - **Skill:** code-writing
-- **Reviewers:** code-reviewer, test-reviewer
+- **Reviewers:** code-reviewer, security-auditor, test-reviewer
 - **Files to modify:** `src/queue_processor.py`, `tests/integration/test_queue_processor.py`
 - **Files to read:** `src/drive.py`, `src/pdf_processor.py`, `src/grader.py`, `src/db.py`
 
@@ -400,16 +402,16 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 #### Task 10: Review Panel UI
 - **Description:** Build the Review Panel Streamlit page: list of students requiring review grouped by cohort, for each student show task results with `confidence=low` — display the full PDF page image (re-rendered on demand from the already-downloaded PDF in `data/downloads/{cohort_id}/`), the task number, recognized answer, and current score; allow operator to edit the answer, triggering `scorer.py` to recompute score and save correction. Handle students with `detected_variant=null` via variant dropdown (CA-19). Interface text must be in English (CA-28). Supports CA-16 through CA-19.
 - **Skill:** code-writing
-- **Reviewers:** code-reviewer, test-reviewer
+- **Reviewers:** code-reviewer, security-auditor, test-reviewer
 - **Verify-user:** open Review Panel → select a student → scan page shown with task number → edit an answer → score updates immediately → mark as done
 - **Files to modify:** `pages/review_panel.py`
 - **Files to read:** `src/db.py`, `src/scorer.py`, `src/pdf_processor.py`
 
 #### Task 11: Excel exporter and Export UI
-- **Description:** Implement `src/exporter.py`: query SQLite for all students across all cohorts, build two DataFrames (Answers + Scores), apply PENDING marker for unreviewed students, compute performance level for grade 3 (leave blank for grade 2), exclude students with status `unreadable` or `error`, sort by school → class → student_id, write timestamped `.xlsx` file. Add Export button and error list display (showing both `unreadable` and `error` students with their messages) to the Main screen. Interface text in English (CA-28). Supports CA-20 through CA-25.
+- **Description:** Implement `src/exporter.py`: query SQLite for all students across all cohorts, build two DataFrames (Answers + Scores), apply PENDING marker for unreviewed students, compute performance level for grade 3 (leave blank for grade 2), exclude students with status `unreadable` or `error`, sort by school → class → student_id, write timestamped `.xlsx` file. Build `pages/export.py` — a dedicated Export screen with the Export button, file download link, and error list display (showing both `unreadable` and `error` students with their `error_message`). Interface text in English (CA-28). Supports CA-20 through CA-25.
 - **Skill:** code-writing
 - **Reviewers:** code-reviewer, test-reviewer
-- **Files to modify:** `src/exporter.py`, `pages/main.py`, `tests/unit/test_exporter.py`
+- **Files to modify:** `src/exporter.py`, `pages/export.py`, `app.py`, `tests/unit/test_exporter.py`
 - **Files to read:** `src/db.py`, `work/core-app/tech-spec.md` (Data Models), `work/core-app/user-spec.md` (CA-20–CA-25)
 
 ### Audit Wave
