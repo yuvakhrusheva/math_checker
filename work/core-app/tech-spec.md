@@ -260,7 +260,7 @@ File naming: `criteria/grade{2|3}_{ru|az}_v{1|2}.json`
 - **`test_grader.py`**: LLM response parsing with fixture JSONs. Valid response → correct task_results. Malformed/unparseable JSON → student status=`error` (not `unreadable`). LLM returns valid JSON with all tasks having empty `recognized_answer` fields → student status=`unreadable`. Missing `detected_variant` (null) → student status=`requires_review`.
 - **`test_pdf_processor.py`**: Convert a valid sample PDF → correct page count and non-empty base64 strings. Corrupted PDF → raises `UnreadablePDFError`. Single-page PDF → list of length 1.
 - **`test_criteria_loader.py`**: Load valid criteria JSON → returns correct schema. Load invalid JSON → raises validation error. Filename/content mismatch (e.g., filename says grade3 but JSON says grade2) → validation error. Path traversal in filename → rejected. Check available combinations (grade+language) based on files in `criteria/`.
-- **`test_exporter.py`**: Excel output structure — correct sheet names ("Answers", "Scores"), correct column headers, student_id present, PENDING for unreviewed students, `unreadable` and `error` students excluded, sort order (school → class → student_id), grade 3 performance levels correct, grade 2 performance level column blank.
+- **`test_exporter.py`**: Excel output structure — correct sheet names ("Answers", "Scores"), correct column headers, student_id present, PENDING for unreviewed students, `error` students included with ERROR marker in all score/answer columns, `unreadable` students excluded entirely (CA-25), sort order (school → class → student_id), grade 3 performance levels correct, grade 2 performance level column blank.
 - **`test_db.py`**: CRUD operations — create cohort, create student, save task_results, update status, query requires_review students. Verify `task_results` has UNIQUE constraint on `(student_id, task_number)` to prevent duplicate saves.
 
 ### Integration tests
@@ -299,11 +299,7 @@ Per-task smoke checks verify external integrations immediately after implementat
 
 ## User-Spec Deviations
 
-### Deviation 1: `error` students excluded from Excel (same as `unreadable`)
-- **User-spec says (CA-25):** Students with status `unreadable` are not included in Excel.
-- **Tech-spec does:** Students with status `error` (Drive download failure, or unparseable LLM response) are also excluded from Excel and shown in the error list alongside `unreadable` students.
-- **Why:** CA-13 and CA-14 describe two failure modes (unreadable PDF, Drive download failure). Both result in incomplete/absent student data that cannot be meaningfully exported. Including `error` students in Excel with all scores blank would be misleading. They appear in the error list with their `error_message` so the operator can take corrective action.
-- **Status:** [PENDING USER APPROVAL]
+None
 
 ## Acceptance Criteria
 
@@ -408,7 +404,7 @@ Technical acceptance criteria (supplement user-spec CA-1 through CA-28):
 - **Files to read:** `src/db.py`, `src/scorer.py`, `src/pdf_processor.py`
 
 #### Task 11: Excel exporter and Export UI
-- **Description:** Implement `src/exporter.py`: query SQLite for all students across all cohorts, build two DataFrames (Answers + Scores), apply PENDING marker for unreviewed students, compute performance level for grade 3 (leave blank for grade 2), exclude students with status `unreadable` or `error`, sort by school → class → student_id, write timestamped `.xlsx` file. Build `pages/export.py` — a dedicated Export screen with the Export button, file download link, and error list display (showing both `unreadable` and `error` students with their `error_message`). Interface text in English (CA-28). Supports CA-20 through CA-25.
+- **Description:** Implement `src/exporter.py`: query SQLite for all students across all cohorts, build two DataFrames (Answers + Scores), apply PENDING marker for unreviewed students, apply `ERROR` marker for students with status `error` (Drive/LLM failures), compute performance level for grade 3 (leave blank for grade 2), exclude only students with status `unreadable` (CA-25), sort by school → class → student_id, write timestamped `.xlsx` file. Build `pages/export.py` — a dedicated Export screen with the Export button, file download link, and error list display (showing `unreadable` students separately with their `error_message`). Interface text in English (CA-28). Supports CA-20 through CA-25.
 - **Skill:** code-writing
 - **Reviewers:** code-reviewer, test-reviewer
 - **Files to modify:** `src/exporter.py`, `pages/export.py`, `app.py`, `tests/unit/test_exporter.py`
