@@ -92,39 +92,50 @@ Technical architecture overview for AI agents. Helps agents understand HOW the s
 
 ## Data Flow
 
-Operator provides Google Drive root folder link → app traverses folder tree (any depth) and identifies leaf folders containing PDF files → operator fills metadata for each folder → PDFs downloaded locally → each PDF page converted to image → image + grading prompt + criteria sent to vision LLM → LLM returns structured JSON with recognized answers and scores → results saved to SQLite → operator triggers Excel export → two-sheet Excel file generated.
+Operator adds a cohort (Google Drive folder link + metadata: school, class, teacher, date, language) → app validates that criteria exist for the cohort's grade+language → cohort queued with status Pending → operator clicks "Start Processing" → app processes cohorts sequentially: downloads PDFs, converts each page to image, sends to LLM with criteria → LLM returns JSON (answers, scores, confidence, variant, student name) → results saved to SQLite → operator reviews uncertain cases in Review Panel → operator exports Excel anytime.
 
-### Google Drive Folder Structure
+### Cohort Model
 
-The app expects scans to be organized as follows (depth is flexible):
+One cohort = one Google Drive folder + one set of metadata. The operator adds each cohort manually — there is no automatic folder traversal. Each folder contains PDF files, one per student.
 
 ```
-[Root folder]
-└── [Any intermediate folders — school name, date, etc.]
-    └── [Leaf folder — contains PDF files]
-        ├── student_001.pdf
-        ├── student_002.pdf
-        └── ...
+[GDrive folder link — entered by operator]
+    ├── student_001.pdf   (one PDF = one student)
+    ├── student_002.pdf
+    └── ...
 ```
 
-A "leaf folder" is any folder that contains at least one PDF file. The app collects all such folders recursively from the root and presents them for metadata entry. Folder names are not parsed — all metadata is entered manually by the operator.
+### Cohort Queue & Processing Pipeline
+
+Cohorts are processed sequentially (not in parallel) to keep Streamlit implementation simple and avoid concurrent API rate limits. Processing runs in a background thread while the UI remains responsive for adding more cohorts.
+
+**Cohort status lifecycle:** `pending → processing → done | done_with_errors`
+
+**Student status values:** `pending | processing | processed | requires_review | unreadable | error`
+- `requires_review` — LLM returned `confidence: low` for ≥1 task, or variant not recognized
+- `unreadable` — LLM could not process any page; excluded from Excel; shown in error list
+- `error` — LLM response unparseable or Drive download failed
 
 ### LLM Input/Output Contract
 
-**Input to LLM (per student PDF page):**
-- Image of the page (base64-encoded)
-- System prompt: role as math grader, instructions to return JSON only
+**Input to LLM (all pages of one student's PDF combined):**
+- Images of all pages (base64-encoded), sent together in one request
+- System prompt: role as math grader, return JSON only
 - User prompt: task list with correct answers and scoring criteria from the criteria JSON
 
 **Expected LLM output (JSON):**
 ```json
 {
+  "recognized_student_name": "Иванов Иван",
+  "detected_variant": 1,
   "tasks": [
     {
       "task_number": 1,
+      "page_number": 1,
       "recognized_answer": "93, 309, 390, 930",
       "score": 4,
       "max_score": 4,
+      "confidence": "high",
       "notes": "Correct ordering"
     },
     ...
@@ -132,7 +143,12 @@ A "leaf folder" is any folder that contains at least one PDF file. The app colle
 }
 ```
 
-If the LLM response cannot be parsed as valid JSON, the student is marked with `status = error` and skipped.
+- `detected_variant`: `1`, `2`, or `null` (if not recognized → student goes to review)
+- `confidence`: `"low"` | `"high"` — if `low` on any task, student flagged for review
+- `recognized_student_name`: best-effort OCR of handwritten name, nullable
+- `page_number`: which PDF page contains this task (stored for Review Panel display)
+
+If the LLM response cannot be parsed as valid JSON → student marked `error` and skipped.
 
 ---
 
@@ -142,32 +158,30 @@ If the LLM response cannot be parsed as valid JSON, the student is marked with `
 
 ### Main Tables
 
-**sessions**
-- Purpose: One processing session = one run of the tool
-- Key fields: `id`, `created_at`, `gdrive_root_url`, `status`
-
-**folders**
-- Purpose: Each Google Drive folder with scans, with operator-entered metadata
-- Key fields: `id`, `session_id`, `gdrive_folder_id`, `school`, `teacher`, `class_number`, `class_letter`, `in_project` (bool), `language` (ru/az), `test_date`, `grade`, `variant`
-- Relationships: `folders.session_id → sessions.id`
+**cohorts**
+- Purpose: One operator-added cohort — one GDrive folder with metadata
+- Key fields: `id`, `created_at`, `gdrive_folder_id`, `gdrive_folder_url`, `school`, `teacher`, `class_number`, `class_letter`, `in_project` (bool), `language` (ru/az), `test_date`, `grade`, `status` (pending/processing/done/done_with_errors)
+- Note: `variant` is NOT stored here — it is detected per-student by the LLM
 
 **students**
 - Purpose: Each PDF file = one student's work
-- Key fields: `id`, `folder_id`, `gdrive_file_id`, `filename`, `status` (pending/processed/error)
-- Relationships: `students.folder_id → folders.id`
+- Key fields: `id`, `cohort_id`, `gdrive_file_id`, `filename`, `recognized_name` (nullable), `detected_variant` (1/2/null), `status` (pending/processing/processed/requires_review/unreadable/error), `review_status` (pending/done, nullable)
+- Relationships: `students.cohort_id → cohorts.id`
 
 **task_results**
 - Purpose: Recognized answer and score for each task of each student
-- Key fields: `id`, `student_id`, `task_number`, `recognized_answer`, `score`, `max_score`, `grading_notes`
+- Key fields: `id`, `student_id`, `task_number`, `page_number`, `recognized_answer`, `score`, `max_score`, `confidence` (low/high), `grading_notes`, `manually_corrected` (bool)
 - Relationships: `task_results.student_id → students.id`
 
 ### Key Constraints
 
-- **Required fields:** `folders`: school, teacher, grade, variant, language are NOT NULL
-- **Status values:** `students.status` ∈ {pending, processed, error}
-- **Language values:** `folders.language` ∈ {ru, az}
+- **Required fields:** `cohorts`: school, teacher, grade, language, gdrive_folder_url are NOT NULL
+- **Student status values:** `students.status` ∈ {pending, processing, processed, requires_review, unreadable, error}
+- **Confidence values:** `task_results.confidence` ∈ {low, high}
+- **Language values:** `cohorts.language` ∈ {ru, az}
+- **Metadata lock:** cohort metadata fields are editable only while `cohorts.status = pending`
 
 ### Sensitive Data
 
-- `folders.school`, `folders.teacher` — institutional data, not personal PII
-- No student personal data stored (students identified by filename only)
+- `cohorts.school`, `cohorts.teacher` — institutional data, not personal PII
+- `students.recognized_name` — handwritten name extracted by OCR; treated as reference data only
