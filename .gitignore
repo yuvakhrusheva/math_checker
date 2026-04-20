@@ -50,3 +50,7 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+
+# math_checker specific
+data/
+criteria/
