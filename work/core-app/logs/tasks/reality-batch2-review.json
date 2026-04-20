@@ -1,0 +1,121 @@
+{
+  "validator": "reality-checker",
+  "batch": 2,
+  "iteration": 1,
+  "status": "pass_with_warnings",
+  "findings": [
+    {
+      "task": 4,
+      "check": "Drive API usage realistic",
+      "severity": "pass",
+      "issue": "files().list with nextPageToken pagination and get_media() for download are correct Google Drive API v3 patterns. MediaIoBaseDownload is the correct class from googleapiclient.http.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 4,
+      "check": "Integration test uses real Drive with TEST_GDRIVE_FOLDER_ID",
+      "severity": "pass",
+      "issue": "TDD Anchor section explicitly states: 'Integration tests require GOOGLE_SERVICE_ACCOUNT_JSON and TEST_GDRIVE_FOLDER_ID env vars.' AC also lists 'Integration tests pass with TEST_GDRIVE_FOLDER_ID env var'. Correctly specified.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 4,
+      "check": "Dependencies correct",
+      "severity": "pass",
+      "issue": "Context Files lists src/db.py (created by T2) and .env.example (created by T1). Both are correct.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 4,
+      "check": "Adequacy and specificity",
+      "severity": "pass",
+      "issue": "Task is highly specific: four named functions, exact scope string, exact retry delays (0.5s/1s/2s), exact error return shape {file_id, error}, CA-14 linkage, sanitization steps enumerated.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 4,
+      "check": "TDD anchors match ACs",
+      "severity": "pass",
+      "issue": "test_get_service_success, test_list_pdfs_returns_correct_count, test_download_pdf_file_size_matches cover ACs for auth/list/download. test_extract_folder_id_various_url_formats and test_filename_sanitization cover URL-parsing and sanitization ACs. All ACs have corresponding tests.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 5,
+      "check": "PyMuPDF API correct",
+      "severity": "pass",
+      "issue": "Implementation hints specify: fitz.Matrix(150/72, 150/72) for DPI, pix.tobytes('jpeg') for JPEG bytes, and fitz.open() for opening. All are correct PyMuPDF >= 1.24 API. The pixmap is obtained via page.get_pixmap(matrix=...) which is the correct method name (not get_image_pixmap or similar).",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 5,
+      "check": "sample.pdf fixture creation mentioned",
+      "severity": "pass",
+      "issue": "Step 3 of 'What to do' explicitly requires creating tests/fixtures/sample.pdf. The Details section provides the exact fitz code to generate it (fitz.open(); doc.new_page(); doc.save(...)) and notes it should not be in production code. The TDD anchors reference this fixture directly.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 5,
+      "check": "Dependencies correct",
+      "severity": "pass",
+      "issue": "Context Files lists tech-spec.md (exists at work/core-app/tech-spec.md). No file dependencies on other tasks' output — pdf_processor is self-contained. Correctly depends_on: [2, 3] per wave gating.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 5,
+      "check": "TDD anchors match ACs",
+      "severity": "pass",
+      "issue": "test_pdf_to_images_valid and test_single_page_pdf/test_multi_page_pdf cover the tuple-list AC. test_page_numbers_are_1based covers 1-based requirement. test_base64_is_valid_jpeg covers JPEG rendering AC. test_corrupted_pdf_raises_unreadable covers UnreadablePDFError AC. Full coverage.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 6,
+      "check": "LiteLLM multi-image message format",
+      "severity": "pass",
+      "issue": "The code snippet uses the OpenAI-compatible content array format: [{type: text, text: prompt}, ...{type: image_url, image_url: {url: data:image/jpeg;base64,...}}]. This is the correct format for LiteLLM vision calls and matches the litellm >= 1.40 API.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 6,
+      "check": "System prompt mentioned",
+      "severity": "warning",
+      "issue": "The system prompt text is specified in the Details section: 'You are a math grader for Azerbaijani school students. Read the handwritten math test shown in the images. For each task, identify the student's answer, compare it to the criteria, and return a JSON response only (no additional text).' HOWEVER, the LiteLLM code snippet in the task only includes a single user-role message. The system prompt is described in prose but is NOT shown in the messages array. The implementer may omit it or incorrectly place it inside the user content block.",
+      "recommendation": "Add an explicit {role: 'system', content: '<system prompt text>'} entry as the first element in the messages array in the code snippet, so the implementer has no ambiguity about how to include the system prompt."
+    },
+    {
+      "task": 6,
+      "check": "Malformed JSON vs all-empty distinction",
+      "severity": "pass",
+      "issue": "The task correctly distinguishes the two cases: (1) json.JSONDecodeError from non-parseable response → propagated to caller → status=error; (2) valid JSON where all tasks have empty recognized_answer AND confidence=high → status=unreadable. These are separate status paths. TDD anchors test_malformed_json_raises (case 1) and the student status determination section (case 2) both cover this. The tech-spec Testing Strategy also confirms: 'Malformed/unparseable JSON → student status=error (not unreadable). LLM returns valid JSON with all tasks having empty recognized_answer fields → student status=unreadable.'",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 6,
+      "check": "compute_score confidence parameter ambiguity",
+      "severity": "warning",
+      "issue": "The scorer.py function signature is compute_score(recognized_answer, task_criteria) -> tuple[float, str] — confidence is NOT a parameter. Yet TDD anchors test_empty_answer_high_confidence and test_empty_answer_low_confidence imply confidence affects scorer behavior. The task description says 'empty answer with confidence=high → score=0, no review flag' but it is unclear whether confidence is passed to compute_score or whether the caller (grader.py) is responsible for the status routing. The code comments in the scorer.py stub say 'If recognized_answer is None or empty and confidence=high → score=0' which implies confidence must somehow be passed. This creates ambiguity: either the function signature is incomplete (missing confidence parameter) or the caller handles confidence-based routing entirely and scorer only handles the score math.",
+      "recommendation": "Either: (a) update compute_score signature to compute_score(recognized_answer, task_criteria, confidence=None) so tests can pass confidence explicitly; or (b) clarify in the task that confidence routing (requires_review flag) is handled by grader.py, not scorer.py — scorer only returns the numeric score. Option (b) is architecturally cleaner and consistent with 'purely deterministic' description."
+    },
+    {
+      "task": 6,
+      "check": "Dependencies correct",
+      "severity": "pass",
+      "issue": "Context Files lists src/criteria_loader.py (created by T3) and config/settings.json (created by T1). Both are correct. depends_on: [2, 3] matches wave 3 gating.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 6,
+      "check": "Adequacy and specificity",
+      "severity": "pass",
+      "issue": "Task provides exact function signatures, complete LiteLLM code snippet with settings consumption, full expected JSON schema, system prompt text, status determination rules, and fixture requirements. Highly executable.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 6,
+      "check": "TDD anchors match ACs",
+      "severity": "pass",
+      "issue": "test_full_credit/test_zero_credit/test_partial_credit cover compute_score tier AC. test_parse_valid_response covers response parsing AC. test_malformed_json_raises covers json.JSONDecodeError propagation AC. test_null_variant_flagged covers detected_variant=null AC. test_build_prompt_structure covers build_prompt AC. All ACs have anchors.",
+      "recommendation": "No action needed."
+    }
+  ],
+  "summary": "Tasks 4 and 5 pass all checks cleanly. Task 4 correctly specifies Drive API v3 patterns, pagination, real-Drive integration tests, and error handling. Task 5 correctly specifies PyMuPDF API (fitz.Matrix, pix.tobytes), sample.pdf fixture generation, and full TDD coverage. Task 6 is well-specified with 2 warnings: (1) the system prompt is described in prose but not shown in the messages array code snippet — an implementer could miss adding it as a separate system-role message; (2) the compute_score function signature omits a confidence parameter but the scorer stub and tests reference confidence-based behavior, creating ambiguity about whether confidence routing lives in scorer.py or grader.py. Both warnings are minor and fixable without redesign. No critical issues. Overall batch status: pass_with_warnings."
+}

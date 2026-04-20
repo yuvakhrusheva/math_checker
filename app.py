@@ -5,7 +5,6 @@ Validates environment on startup, initialises the database, and routes to
 the four application pages via st.navigation.
 """
 import os
-import sys
 
 from dotenv import load_dotenv
 
@@ -18,6 +17,10 @@ def validate_config() -> None:
     Validate required environment variables.
     Raises ValueError with a clear message on any problem.
     Must be called before any Streamlit UI is rendered.
+
+    Security notes:
+    - Checks that the service account key path is absolute (no traversal via relative paths).
+    - Resolves symlinks and verifies the real path stays outside repo root.
     """
     key_path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
@@ -25,21 +28,30 @@ def validate_config() -> None:
         raise ValueError(
             "GOOGLE_SERVICE_ACCOUNT_JSON is not set. "
             "Set it to the absolute path of your Google service account JSON key file "
-            "(e.g. /home/user/keys/math_checker_sa.json). "
-            "The file must be stored OUTSIDE the repository root."
+            "stored OUTSIDE the repository root."
         )
 
     if not os.path.isabs(key_path):
         raise ValueError(
-            f"GOOGLE_SERVICE_ACCOUNT_JSON must be an absolute path, "
-            f"but got a relative path: '{key_path}'. "
-            "Use a full path such as /home/user/keys/service_account.json."
+            "GOOGLE_SERVICE_ACCOUNT_JSON must be an absolute path, "
+            "but a relative path was provided. "
+            "Use a full absolute path such as /home/user/keys/service_account.json."
         )
 
-    if not os.path.isfile(key_path):
+    real_path = os.path.realpath(key_path)
+
+    if not os.path.isfile(real_path):
         raise ValueError(
-            f"GOOGLE_SERVICE_ACCOUNT_JSON points to a file that does not exist: '{key_path}'. "
-            "Make sure the file exists and the path is correct."
+            "GOOGLE_SERVICE_ACCOUNT_JSON points to a file that does not exist. "
+            "Make sure the file exists and the path in .env is correct."
+        )
+
+    # Ensure the key file is not inside the repository root
+    repo_root = os.path.realpath(os.path.dirname(__file__))
+    if real_path.startswith(repo_root + os.sep) or real_path == repo_root:
+        raise ValueError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON must point to a file OUTSIDE the repository root. "
+            "Move the key file to a directory outside the project folder."
         )
 
 
@@ -51,13 +63,16 @@ def main() -> None:
     try:
         validate_config()
     except ValueError as exc:
-        st.error(f"Configuration error: {exc}")
+        st.error(
+            f"⚠️ Configuration error: {exc}\n\n"
+            "Please check your `.env` file and restart the app."
+        )
         st.stop()
 
     # Initialise database (creates tables if they don't exist)
     init_db()
 
-    # Page routing
+    # Page routing — all four pages registered here (sole owner of st.navigation)
     pages = [
         st.Page("pages/criteria_management.py", title="Criteria Management", icon="📋"),
         st.Page("pages/main.py", title="Cohort Queue", icon="📂"),
@@ -68,5 +83,6 @@ def main() -> None:
     pg.run()
 
 
-if __name__ == "__main__" or "streamlit" in sys.modules:
+# Streamlit executes this file as __main__ when running `streamlit run app.py`
+if __name__ == "__main__":
     main()

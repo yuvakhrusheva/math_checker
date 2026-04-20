@@ -1,0 +1,90 @@
+{
+  "findings": [
+    {
+      "type": "contradiction",
+      "severity": "critical",
+      "location": "Data Model / Cohort vs Session+Folder architecture",
+      "description": "The user-spec describes a cohort-based model (one GDrive folder link = one cohort with metadata: school, class, teacher, date, language). The architecture.md describes a different model: sessions (one processing run) containing folders (discovered by recursive traversal of a root folder). In the interview the user explicitly said: operator adds a link to a folder + cohort metadata. The architecture instead expects a root folder with nested subfolders where each leaf folder is a separate unit requiring separate metadata entry. These are fundamentally different workflows.",
+      "recommendation": "Align architecture.md to the user-spec cohort model. One cohort = one GDrive folder link + one set of metadata. Remove the session/root-folder/recursive-traversal concept unless explicitly needed."
+    },
+    {
+      "type": "contradiction",
+      "severity": "major",
+      "location": "Data Model / variant field",
+      "description": "Architecture.md places 'variant' as a field on the folders table (operator-entered metadata). The user-spec and interview explicitly state that the variant (1 or 2) is auto-detected by the LLM from the scan, not entered by the operator. The variant should be per-student (detected from their PDF), not per-folder.",
+      "recommendation": "Move variant to the students table. It should be populated by LLM recognition, not operator input. Add a nullable variant field on students with status values like detected/manual/unknown."
+    },
+    {
+      "type": "contradiction",
+      "severity": "major",
+      "location": "Data Model / confidence field",
+      "description": "The user-spec requires confidence: low/high per task from the LLM and a review workflow for low-confidence tasks. The architecture's task_results table has no confidence field. The students table has no 'requires_review' or 'review_status' field.",
+      "recommendation": "Add 'confidence' (low/high) to task_results table. Add 'requires_review' boolean and 'review_status' to students table."
+    },
+    {
+      "type": "gap",
+      "severity": "major",
+      "location": "Data Model / student_name",
+      "description": "The user-spec mentions student name as a reference column in Excel (extracted from handwritten text by the LLM). The architecture's students table has no name field — only filename and gdrive_file_id.",
+      "recommendation": "Add 'recognized_name' (nullable text) to the students table, populated by LLM output."
+    },
+    {
+      "type": "contradiction",
+      "severity": "major",
+      "location": "Data Model / student status values",
+      "description": "Architecture defines students.status as {pending, processed, error}. The user-spec requires additional statuses: 'unreadable' (excluded from Excel, goes to error list) and 'requires_review' (has low-confidence tasks or unrecognized variant). These are distinct from 'error' (which covers LLM parse failures).",
+      "recommendation": "Expand status enum to: pending, processing, processed, requires_review, unreadable, error. Or use separate boolean flags for review/unreadable alongside the processing status."
+    },
+    {
+      "type": "gap",
+      "severity": "major",
+      "location": "Architecture / Cohort queue and processing pipeline",
+      "description": "The user-spec describes a cohort queue with statuses (pending/processing/done/has_errors), sequential processing, and progress tracking. The architecture.md has no mention of a queue mechanism, processing pipeline, or background processing approach for Streamlit.",
+      "recommendation": "Add a section in architecture.md describing the cohort queue model, how background processing works within Streamlit (threading or subprocess), and the cohort status lifecycle."
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "Architecture / Criteria management",
+      "description": "The user-spec describes a Criteria Management screen for uploading JSON files with validation. Architecture.md shows criteria files exist in criteria/ but does not describe the upload/validation flow or the UI screen.",
+      "recommendation": "Add criteria management to the architecture data flow and mention the validation logic for criteria JSON files."
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "User-spec / LLM prompt and response contract",
+      "description": "The user-spec specifies the LLM returns confidence: low/high per task, but does not describe the full LLM response schema including student name extraction and variant detection. Architecture.md has a partial LLM contract but missing confidence and variant fields.",
+      "recommendation": "Align both documents on a complete LLM response schema: tasks array (with confidence per task), detected_variant (1/2/null), and recognized_student_name."
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "User-spec / Google Drive authentication",
+      "description": "The user-spec mentions .env setup but does not specify the Google Drive auth method. Architecture.md mentions service account JSON or user OAuth flow. The interview mentions a Google service account. This should be explicit in the spec to avoid ambiguity.",
+      "recommendation": "Add a brief note in user-spec constraints or technical decisions specifying service account auth via .env."
+    },
+    {
+      "type": "shallow_solution",
+      "severity": "minor",
+      "location": "User-spec / Review Panel visual highlighting",
+      "description": "CA-17 requires 'visual highlighting of the problematic field' on the scan image. This is non-trivial: it requires either the LLM to return bounding box coordinates or a separate OCR/detection step. Neither the spec nor architecture addresses how this highlighting would work technically.",
+      "recommendation": "Either simplify to showing the full page scan without highlighting (MVP), or specify that the LLM must return approximate task/field locations, or plan a separate detection mechanism. Current requirement is underspecified for implementation."
+    },
+    {
+      "type": "overengineering",
+      "severity": "minor",
+      "location": "User-spec / CA-7 metadata editing",
+      "description": "CA-7 allows editing cohort metadata at any time. If metadata (school, class, teacher) is already written into processed results and Excel, editing after processing could create inconsistencies. For MVP this adds complexity with limited benefit.",
+      "recommendation": "Restrict metadata editing to cohorts in pending/processing status, or clarify that edits propagate to all downstream data. For MVP, consider allowing edits only before processing starts."
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "User-spec / Performance levels for grade 2",
+      "description": "CA-22 notes grade 2 performance levels as TBD. The constraints section also notes this. However there is no mechanism described for adding grade 2 levels later without code changes.",
+      "recommendation": "Store performance level thresholds in criteria JSON or a separate config file rather than hardcoding, so grade 2 levels can be added without code changes."
+    }
+  ],
+  "overall": "fail",
+  "summary": "The user-spec accurately captures the interview discussion and is well-structured with clear acceptance criteria. However, the architecture.md has critical misalignment with the spec: the data model uses a session/folder hierarchy instead of the cohort-based model discussed in the interview, variant is incorrectly placed as folder-level operator input instead of student-level LLM detection, and key fields (confidence, recognized_name, review statuses) are missing from the schema. These contradictions must be resolved before implementation to avoid rework."
+}

@@ -1,0 +1,48 @@
+{
+  "findings": [
+    {
+      "type": "contradiction",
+      "severity": "major",
+      "location": "CA-7 / Сценарий 2 / Технические решения",
+      "description": "CA-7 and the architecture's Key Constraints both say cohort metadata is editable only while status = Pending (locked after processing starts). However, interview Q7 explicitly states 'Можно редактировать в любой момент' (editable at any time). The spec tightened the constraint beyond what the user confirmed.",
+      "recommendation": "Clarify with the operator which behavior is intended. If the post-interview decision was to lock metadata, add a note explaining WHY it was changed from the interview answer (e.g., 'changed from interview answer to prevent data inconsistency mid-processing'). Otherwise, revert CA-7 to 'editable anytime'."
+    },
+    {
+      "type": "contradiction",
+      "severity": "minor",
+      "location": "Сценарий 4 (step 3) vs CA-17",
+      "description": "Scenario 4 step 3 describes 'скан страницы с выделенным полем, где confidence: low' (scan with the uncertain field highlighted). CA-17 explicitly says 'полная страница без bounding-box выделения (MVP)' (full page, no highlighting). The scenario narrative contradicts the acceptance criterion in the same document.",
+      "recommendation": "Align the narrative with CA-17: update Scenario 4 step 3 to remove the mention of 'выделенным полем' and instead say 'полная страница с указанием номера задания'."
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "Критерии приёмки / Обработка",
+      "description": "There is no CA covering the behavior of the 'Start Processing' button when processing is already running. The spec defines that processing starts on button press (CA-6b) but does not specify whether the button is disabled during processing or what happens on a second click.",
+      "recommendation": "Add CA: 'While processing is active, the Start Processing button is disabled; it re-enables after the queue is fully processed or stops with an error.'"
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "Сценарий 3 / CA-12",
+      "description": "CA-12 says empty answer = 0 points automatically. Interview Q3 distinguishes 'empty field = 0' from 'unreadable text = review'. The spec does not clarify whether an empty recognized_answer with confidence:low still gets flagged for review, or whether auto-zero takes precedence and suppresses the review flag. These are operationally different outcomes.",
+      "recommendation": "Add a note to CA-12 or CA-11: 'Empty recognized_answer (score auto-set to 0) does not trigger review unless confidence is also low. Unreadable (non-empty but illegible) text with confidence:low does trigger review.'"
+    },
+    {
+      "type": "gap",
+      "severity": "minor",
+      "location": "Ограничения",
+      "description": "The Limitations section says 'AZ-критерии пока отсутствуют' without clarifying that Grade 2 RU criteria DO exist (confirmed in interview Q1: 'Есть все файлы и для 2, и для 3 класса, но пока только на русском языке'). An implementer reading only the spec might incorrectly assume grade 2 is broadly blocked, not just AZ-language blocked.",
+      "recommendation": "Clarify the Limitations bullet: 'AZ-criteria are not yet available for any grade; Grade 2 RU criteria exist. AZ-cohorts cannot be added until AZ-criteria are loaded.'"
+    },
+    {
+      "type": "contradiction",
+      "severity": "minor",
+      "location": "Architecture cohort status vs spec main screen description",
+      "description": "The architecture defines the cohort status value as 'done_with_errors', but the interview Q7 answer uses 'has_errors'. The spec's main screen scenario does not formally enumerate status labels, leaving implementers to reconcile two different names from two different sources.",
+      "recommendation": "Add a formal status enum to the spec (e.g., in a Terminology or Data Model section): cohort statuses are pending | processing | done | done_with_errors. This removes ambiguity without requiring a user interview."
+    }
+  ],
+  "overall": "fail",
+  "summary": "Six new issues were found. The most significant is a contradiction between CA-7's metadata lock and the interview's explicit 'editable at any time' answer — this represents a spec decision that diverges from user intent without explanation. The scenario narrative also contradicts its own CA-17 on bounding-box highlighting. The remaining four findings are minor gaps around button state, empty-vs-unreadable distinction, grade 2 criteria availability wording, and cohort status enum naming."
+}

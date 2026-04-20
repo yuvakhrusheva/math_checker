@@ -1,0 +1,60 @@
+{
+  "validator": "tech-spec-validator",
+  "round": 2,
+  "status": "fail",
+  "fixed_since_round_1": [
+    "Decision 7 now has [TECHNICAL] tag",
+    "Wave 1 is now solo (Task 1 only)",
+    "Wave 2 has Tasks 2, 3 (parallel, depends on Wave 1)",
+    "Wave 3 has Tasks 4, 5, 6 (parallel, depends on Wave 2)",
+    "Wave 4 has Tasks 7, 8 (parallel, depends on Wave 3)",
+    "Wave 5 has Tasks 9, 10, 11 (parallel, depends on Wave 4)",
+    "Task 9 now reads queue_processor.py (Task 7 in Wave 4) — hidden same-wave dependency resolved",
+    "User-Spec Deviations section now marks the error student deviation as [PENDING USER APPROVAL]",
+    "Frontmatter fields confirmed present: created, status, size, branch"
+  ],
+  "dependency_check": {
+    "wave_1": "PASS — Task 1 solo, no parallel label",
+    "wave_2": "PASS — Tasks 2, 3 parallel; both depend only on Wave 1 output (project skeleton)",
+    "wave_3": "PASS — Tasks 4, 5, 6 parallel; all depend only on Wave 2 outputs",
+    "wave_4": "PASS — Tasks 7, 8 parallel; Task 7 depends on drive.py/pdf_processor.py/grader.py/db.py (Wave 3+2 ✓); Task 8 depends on criteria_loader.py/db.py (Wave 2+3 ✓)",
+    "wave_5_task_9": "PASS — Task 9 reads queue_processor.py (Task 7, Wave 4 ✓)",
+    "wave_5_task_10": "PASS — Task 10 reads scorer.py (Task 6, Wave 3 ✓) and pdf_processor.py (Task 5, Wave 3 ✓)",
+    "wave_5_task_11": "PASS — Task 11 reads db.py (Task 2, Wave 2 ✓)",
+    "audit_wave": "PASS — reads all src/ and tests/ output from Wave 5 ✓",
+    "final_wave": "PASS — Task 15 runs after Audit Wave ✓"
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "Task 4 description — drive.py",
+      "issue": "Task description contains HOW-level implementation details: 'strip path separators, disallow traversal sequences' specifies the exact mechanism for filename sanitization, and 'retry with exponential backoff on 429 rate limit errors' specifies the retry strategy. Task descriptions should say WHAT to achieve (safe filename sanitization, resilience to rate limits) and WHY, leaving HOW to the implementing agent.",
+      "recommendation": "Rewrite as: 'Sanitize Drive-returned filenames before writing to disk to prevent path traversal. Handle Google Drive API rate limit errors gracefully to avoid failing large cohort runs.' Remove the mechanism-level specifics (strip path separators, exponential backoff) from the task description."
+    },
+    {
+      "severity": "warning",
+      "location": "Task 7 description — queue_processor.py",
+      "issue": "Task description contains HOW-level implementation details: 'strip any content resembling API keys or tokens (lines matching sk-, AIza, base64 blobs >50 chars)' specifies the exact sanitization patterns. Task descriptions should say WHAT (sanitize error messages before storing) and WHY (prevent accidental secret leakage in DB), not HOW (which regex patterns to match).",
+      "recommendation": "Rewrite as: 'Sanitize LLM/Drive error messages before storing in error_message to prevent accidental leakage of API keys or tokens into the database.' Remove the specific pattern list."
+    },
+    {
+      "severity": "warning",
+      "location": "Tasks 3, 5, 7, 8, 9, 10, 11 — Reviewers field",
+      "issue": "These code-writing tasks omit security-auditor from the Reviewers field. Per the skills-and-reviewers catalog, the default reviewer set for code-writing is: code-reviewer, security-auditor, test-reviewer. This warning was raised in round 1 but was not addressed. Tasks 3 (criteria file loading with path traversal), 7 (queue processor with error sanitization), and 10 (review panel with file access) in particular handle security-sensitive operations and should include security-auditor.",
+      "recommendation": "Add security-auditor to the Reviewers list for Tasks 3, 5, 7, 8, 9, 10, 11. At minimum add it to Tasks 3, 7, and 10 which handle file I/O, threading, and user-editable data."
+    },
+    {
+      "severity": "info",
+      "location": "Task 5 description — pdf_processor.py",
+      "issue": "'render each page to JPEG at 150 DPI' includes a specific implementation parameter (150 DPI). This is borderline — it reads more like a spec constraint than a HOW step, but it could be interpreted as prescribing implementation. If the DPI value is a meaningful quality/performance tradeoff decision, it should be in the Decisions section. If it is genuinely just an implementation detail, it is acceptable here.",
+      "recommendation": "Either move the DPI tradeoff to a Decision entry, or keep it here as an implementation constraint. Either choice is acceptable — this is informational."
+    },
+    {
+      "severity": "info",
+      "location": "Tasks 1–11 — Non-template fields (Files to modify, Files to read)",
+      "issue": "Tasks include Files to modify and Files to read fields that are non-standard per the tech-spec template. This was raised in round 1 as a warning and remains unchanged. These fields are not prohibited but belong in task-decomposition artifacts (tasks/*.md), not in the tech-spec.",
+      "recommendation": "Consider removing these fields from the tech-spec tasks section. They will be determined during task decomposition. Alternatively confirm this is an intentional project convention — if so, document it."
+    }
+  ],
+  "summary": "Wave dependencies and structure are now fully correct — all round 1 critical issues are resolved. Remaining issues are 2 warnings (HOW-level details in Task 4 and Task 7 descriptions; missing security-auditor reviewers on 7 tasks) and 2 informational notes. The spec is functionally sound and can proceed to task decomposition, but the HOW-level description language and reviewer gaps should be cleaned up before agent execution to avoid constraining the implementing agents unnecessarily."
+}

@@ -1,0 +1,107 @@
+{
+  "validator": "completeness-validator",
+  "round": 2,
+  "status": "partial-pass",
+  "round1_fixes_confirmed": [
+    "CA-14 now traced to Task 4 with explicit '(CA-14)' citation in description",
+    "CA-28 now referenced in Tasks 8, 9, 10, 11 with 'Interface text must be in English (CA-28)'",
+    "Task 10 now specifies re-rendering from data/downloads/{cohort_id}/ — image retrieval gap closed",
+    "CA-6b now referenced in Task 9 description",
+    "CA-13 / error vs unreadable distinction now documented in User-Spec Deviations section"
+  ],
+  "findings": [
+    {
+      "id": "R2-01",
+      "type": "traceability",
+      "severity": "warning",
+      "location": "CA-12 / Task 6 (grader.py, scorer.py)",
+      "issue": "CA-12 (empty answer with confidence=high → 0 pts auto; empty answer with confidence=low → sent to review as unreadable) is still not referenced in any task description. Round 1 recommended adding 'Supports CA-11/CA-12' to Task 6. Task 6 still only cites no CA numbers in its description body, and the Testing Strategy test_scorer.py section covers the behavior implicitly but the task itself has no CA-12 trace.",
+      "recommendation": "Add 'Supports CA-11, CA-12' to the Task 6 description. The empty-answer/confidence split is the core logic of scorer.py and should be explicitly traced to the CAs it implements.",
+      "status": "not-fixed-from-round-1"
+    },
+    {
+      "id": "R2-02",
+      "type": "traceability",
+      "severity": "warning",
+      "location": "CA-26, CA-27 / no task",
+      "issue": "CA-26 ('app launches with streamlit run app.py without additional steps') and CA-27 ('all data in SQLite; state restored after browser refresh') are not explicitly cited in any implementation task. CA-26 is partially covered by the Acceptance Criteria checklist and Task 1, but neither Task 1 nor any other task says 'Supports CA-26'. CA-27 is addressed architecturally by Decision 1 and Task 2, but no task cites it. This breaks bidirectional traceability for 2 of the 28 CAs.",
+      "recommendation": "Add 'Supports CA-26' to Task 1 (infrastructure setup verifies streamlit run app.py works). Add 'Supports CA-27' to Task 2 (db.py and SQLite persistence is the mechanism for state restoration).",
+      "status": "new"
+    },
+    {
+      "id": "R2-03",
+      "type": "parallelism-conflict",
+      "severity": "warning",
+      "location": "Wave 5: Task 9 and Task 11 — pages/main.py",
+      "issue": "Task 9 (Main screen UI) and Task 11 (Excel exporter and Export UI) are both in Wave 5 (parallel) and both list 'pages/main.py' in their 'Files to modify'. Task 9 builds the primary Main screen (cohort queue, Add Cohort form, Start Processing, progress display). Task 11 adds the Export button and error list to the same file. If executed in parallel, the two agents will produce conflicting edits to pages/main.py, causing a merge conflict or one agent overwriting the other's changes.",
+      "recommendation": "Either (a) move Task 11's main.py edits to a sub-task of Task 9 so they share a single pages/main.py author, (b) split Task 11 into 'exporter.py + test' (Wave 5) and 'Export UI additions to main.py' (Wave 6, after Task 9 is committed), or (c) add a note that Task 11 must start only after Task 9's pages/main.py changes are committed.",
+      "status": "new"
+    },
+    {
+      "id": "R2-04",
+      "type": "scope_creep",
+      "severity": "warning",
+      "location": "Task 3: Criteria JSON schema and sample files — 'based on answer key documents provided by the operator before first use'",
+      "issue": "This phrase was flagged in Round 1 and remains unchanged. Task 3 lists creating 4 real criteria files (grade2_ru_v1.json, grade2_ru_v2.json, grade3_ru_v1.json, grade3_ru_v2.json) in 'Files to modify', with the qualification 'based on answer key documents provided by the operator before first use.' This implies the implementing agent must (a) receive real answer key documents from the operator, and (b) translate them into JSON. Neither step is within the agent's scope — the agent has no access to the answer keys, and authoring curriculum content is not a software development task. The user-spec Constraints section says criteria 'will be loaded before work begins' (via UI), not that the app ships with pre-seeded real criteria.",
+      "recommendation": "Remove the 4 criteria JSON files from Task 3's 'Files to modify'. Task 3 should only implement src/criteria_loader.py, the JSON schema definition (documented in tech-spec), tests, and an empty criteria/ directory. The actual criteria files are the operator's responsibility and are loaded via the CA-1 UI workflow. If placeholder/example files are needed for tests, use clearly-labeled fixture files under tests/fixtures/, not the live criteria/ directory. Mark this as [PENDING USER APPROVAL] until the operator confirms whether they will provide answer key documents to the agent.",
+      "status": "persists-from-round-1-unfixed"
+    },
+    {
+      "id": "R2-05",
+      "type": "adequacy",
+      "severity": "info",
+      "location": "User-Spec Deviations: Deviation 1 vs CA-13 and CA-14",
+      "issue": "Deviation 1 adequately handles the CA-13/CA-14 distinction with the following logic now present across the spec: (a) CA-13 unreadable PDF (corrupt/empty) → UnreadablePDFError in pdf_processor.py → status=unreadable; (b) LLM returns valid JSON but all recognized_answer fields empty → status=unreadable (per test_grader.py); (c) LLM returns unparseable/malformed JSON → status=error; (d) Drive download failure → status=error (CA-14). Both unreadable and error are excluded from Excel (Deviation 1). The deviation correctly frames the user-spec's CA-25 (only unreadable excluded) as the baseline and the tech-spec extension (also exclude error) as the deviation requiring approval. One minor adequacy gap: Deviation 1 text lists 'Drive download failure, or unparseable LLM response' as the error triggers but does not mention the third error trigger — LLM returns structurally valid JSON with wrong schema (missing required fields), which per the Risks section also produces status=error. This omission in the deviation description creates a partial audit trail.",
+      "recommendation": "Extend Deviation 1's 'Why' clause to include all three error triggers: (1) Drive download failure, (2) unparseable/malformed LLM JSON, (3) valid JSON but missing required response fields. This makes the deviation self-documenting for the auditor.",
+      "status": "new-minor"
+    },
+    {
+      "id": "R2-06",
+      "type": "scope_creep",
+      "severity": "info",
+      "location": "Task 3 — scope_creep status",
+      "issue": "Deviation 1 is marked [PENDING USER APPROVAL] as required. No other deviations are present in the tech-spec. All other scope extensions (e.g., error student exclusion from Excel) are captured under Deviation 1. Deviation status is correctly applied.",
+      "recommendation": "No action needed — deviation documentation is compliant.",
+      "status": "pass"
+    }
+  ],
+  "ca_coverage": {
+    "fully_covered": [
+      "CA-1", "CA-2", "CA-3",
+      "CA-4", "CA-5", "CA-6", "CA-6b", "CA-7",
+      "CA-8", "CA-9", "CA-10", "CA-11",
+      "CA-13", "CA-14", "CA-15",
+      "CA-16", "CA-17", "CA-18", "CA-19",
+      "CA-20", "CA-21", "CA-22", "CA-23", "CA-24", "CA-25",
+      "CA-28"
+    ],
+    "implicitly_covered_missing_explicit_trace": [
+      "CA-12",
+      "CA-26",
+      "CA-27"
+    ],
+    "uncovered": []
+  },
+  "wave_dependency_check": {
+    "status": "partial-pass",
+    "violations": [
+      "Wave 5 parallel conflict: Task 9 and Task 11 both write pages/main.py (see R2-03)"
+    ],
+    "clean": [
+      "Wave 1 → Wave 2: Task 1 infrastructure is sole dependency of Tasks 2 and 3 — correct",
+      "Wave 2 → Wave 3: Tasks 2 and 3 outputs are consumed by Tasks 4, 5, 6 in correct wave order",
+      "Wave 3 → Wave 4: Tasks 4, 5, 6 outputs consumed by Tasks 7 and 8 in correct wave order",
+      "Wave 4 → Wave 5: Tasks 7 and 8 outputs consumed by Tasks 9, 10, 11 in correct wave order",
+      "Wave 5 → Audit: Tasks 12, 13, 14 read all src/ and pages/ outputs — correct ordering",
+      "Audit → Final: Task 15 (pre-deploy QA) depends on all prior work — correct"
+    ]
+  },
+  "deviations_with_pending_approval": [
+    {
+      "id": "Deviation 1",
+      "description": "error students excluded from Excel alongside unreadable students",
+      "status": "[PENDING USER APPROVAL] — correctly marked"
+    }
+  ],
+  "summary": "Round 2 confirms all 5 round-1 fixes are in place and CA coverage has improved to 28/28 with 3 CAs (CA-12, CA-26, CA-27) having only implicit rather than explicit task-level traces. Two new issues found: a Wave 5 parallelism conflict where Tasks 9 and 11 both write pages/main.py, and the Task 3 scope creep (pre-creating real criteria JSON files from operator-provided answer keys) which was flagged in round 1 but remains unaddressed. Deviation 1 adequately covers CA-13/CA-14 logic but could be more complete in listing all three error triggers. No CAs are fully uncovered. The spec is close to implementation-ready pending resolution of the Task 9/11 file conflict and Task 3 scope clarification."
+}

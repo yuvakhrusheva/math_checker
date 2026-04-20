@@ -1,0 +1,63 @@
+{
+  "checks": [
+    {
+      "name": "frontmatter_complete",
+      "pass": true,
+      "finding": "All four required fields present and valid: created (2026-04-13), status (draft), type (feature), size (L). Values are from allowed sets."
+    },
+    {
+      "name": "what_section_clear",
+      "pass": true,
+      "finding": "Section 'Что делаем' is one focused paragraph: names the tool (Streamlit), the subject (handwritten math tests, grades 2-3, Azerbaijan), the operator action (adds cohorts via Google Drive), the processing mechanism (vision LLM), and the output (Excel). No ambiguity."
+    },
+    {
+      "name": "why_section_concrete",
+      "pass": true,
+      "finding": "Section 'Зачем' gives a concrete problem statement: ~1200 papers, time cost, inconsistent results. Automation goal is stated with the operator's residual role (QA for disputed cases). Sufficiently specific for a real project."
+    },
+    {
+      "name": "scenarios_step_by_step",
+      "pass": true,
+      "finding": "Five numbered scenarios, each decomposed into numbered steps. All major user journeys are covered: initial setup, adding a cohort, processing, manual review, and export. Steps are actor-driven and ordered. No scenario is a vague paragraph."
+    },
+    {
+      "name": "acceptance_criteria_testable",
+      "pass": true,
+      "finding": "28 acceptance criteria (CA-1 through CA-28), grouped by functional area. Each is a single, concrete, binary-verifiable condition (e.g. 'score = 0', 'file appears in criteria/', 'sorted school → class → student_id'). CA-22 has a minor caveat (grade 2 levels TBD) but this is acknowledged in Constraints."
+    },
+    {
+      "name": "no_placeholders",
+      "pass": false,
+      "finding": "Two explicit TBD items remain: (1) CA-22 'grade 2: TBD' — success levels for 2nd grade not defined; (2) Constraints section 'Уровни успеваемости для 2-го класса не определены'. These are acknowledged limitations, not forgotten placeholders, but they leave a testable criterion (CA-22) incomplete for grade 2 scope."
+    },
+    {
+      "name": "risks_have_mitigations",
+      "pass": true,
+      "finding": "Four risks listed, each with a bold mitigation: unreliable variant recognition → Review Panel; high low-confidence rate → post-MVP prompt tuning; LLM cost → LiteLLM model switch; unknown page count → iterate all pages. All mitigations are actionable."
+    },
+    {
+      "name": "testing_strategy_defined",
+      "pass": true,
+      "finding": "Testing section explicitly states: unit tests always done; integration tests with real Google Drive account (no mocking); E2E skipped for MVP, replaced by manual run on prior-year data with ≤3% tolerance. The strategy is concrete and the MVP trade-off is justified."
+    },
+    {
+      "name": "verification_table_complete",
+      "pass": true,
+      "finding": "Verification table has 7 rows covering: criteria upload, cohort rejection without criteria, integration processing (5 PDFs), grader unit tests (confidence:low, empty answer), Excel export structure, and idempotent re-run. Each row has a step, tooling, and expected result. Manual user checks are also listed separately."
+    },
+    {
+      "name": "size_matches_complexity",
+      "pass": true,
+      "finding": "Size L is appropriate. The feature spans: Streamlit multi-screen UI, Google Drive API integration, PDF-to-image conversion, vision LLM pipeline, SQLite persistence, review panel with image display, Excel export with two sheets, and criteria management. This clearly requires new architecture (L definition: new architecture)."
+    }
+  ],
+  "overall": "fail",
+  "critical_findings": [
+    "CA-22 contains 'grade 2: TBD' — the acceptance criterion for 2nd-grade performance levels is explicitly undefined. This means the Excel Scores sheet output cannot be fully verified for grade 2 cohorts. Either the grade 2 levels must be defined before implementation begins, or grade 2 must be formally descoped from this spec."
+  ],
+  "minor_findings": [
+    "Constraint 'AZ-criteria пока отсутствуют' means Azerbaijani-language cohorts are effectively blocked at the form level, but there is no acceptance criterion covering the AZ-language path end-to-end. If AZ support is in scope, add a CA for it; if out of scope for this release, state so explicitly.",
+    "Scenario 4 (Review Panel) step 3 says the scan is shown 'с выделенным полем' (with highlighted field), but CA-17 clarifies it is 'full page without bounding-box (MVP)'. The scenario text contradicts the acceptance criterion — the scenario should be updated to match CA-17.",
+    "The 'Технические решения' section is informative but overlaps with what a tech-spec should own. No blocking issue, but decisions like LiteLLM, service account auth, and sequential processing are implementation choices that belong in tech-spec.md, not user-spec.md."
+  ]
+}

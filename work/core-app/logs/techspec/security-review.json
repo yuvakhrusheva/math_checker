@@ -1,0 +1,66 @@
+{
+  "validator": "security-auditor",
+  "round": 2,
+  "status": "fail",
+  "fixed_from_round_1": [
+    "Decision 6: drive.readonly scope now mandated; key file 0600 permissions and location outside repo root now required",
+    "Task 4: filename sanitization for Drive downloads now required",
+    "Task 3: path traversal prevention for criteria uploads now required",
+    "Task 2: parameterized SQL queries now explicitly required",
+    "Task 7: error message sanitization before DB write now required (strips sk-, AIza, base64 blobs >50 chars)",
+    "Decision 1: WAL mode now explicitly specified with PRAGMA journal_mode=WAL",
+    "Task 2: init_db() now explicitly required to enable WAL mode"
+  ],
+  "findings": [
+    {
+      "owasp_category": "A05-Security Misconfiguration",
+      "severity": "warning",
+      "location": "Task 1 / app.py startup / .env.example",
+      "issue": "Decision 6 now correctly mandates that the GOOGLE_SERVICE_ACCOUNT_JSON key file must reside outside the repo root with 0600 permissions. However, Task 1 has no requirement to validate this env var at application startup. Specifically: (1) no check that the value is an absolute path (a relative path could point inside the repo); (2) no check that the file actually exists and is readable before the app starts; (3) no check that the resolved path is not inside the repo root at runtime. If an operator sets GOOGLE_SERVICE_ACCOUNT_JSON to a relative path like 'service_account.json', the key file silently ends up inside the repo, where gitleaks may not catch it (gitleaks targets secret content patterns, not file placement). Additionally, .env.example is listed as a file to create in Task 1, but the spec does not require it to include a comment explaining that the value must be an absolute path outside the repo.",
+      "recommendation": "Add to Task 1: '.env.example must include a comment on GOOGLE_SERVICE_ACCOUNT_JSON clarifying that the value must be an absolute path outside the repository root (e.g., /home/user/.config/math_checker/service_account.json).' Add to app.py startup (or a config validation module): 'On startup, validate that GOOGLE_SERVICE_ACCOUNT_JSON is set, is an absolute path, and resolves to a location outside the current repo root (os.path.abspath check). Fail with a clear error if the path is relative or inside the repo directory tree.'"
+    },
+    {
+      "owasp_category": "A09-Logging Failures",
+      "severity": "warning",
+      "location": "Task 6 / src/grader.py — error propagation to Task 7",
+      "issue": "Task 7 (queue_processor) requires sanitizing error messages before storing in students.error_message, stripping content matching sk-, AIza, and base64 blobs >50 chars. However, the sanitization is only specified at the queue_processor layer (Task 7). Task 6 (grader.py) is where LLM API calls are made and where API-key-bearing exceptions originate (LiteLLM raises exceptions that can embed full HTTP request/response bodies, including Authorization headers). The spec relies entirely on the queue_processor catching all grader exceptions and sanitizing them. If grader.py ever surfaces an error in a way that bypasses queue_processor (e.g., a structured return value used in review_panel.py for rescoring), secrets could reach the UI unsanitized. Additionally, the current sanitization pattern is incomplete: it covers sk- (OpenAI/Anthropic), AIza (Google), and long base64 blobs, but not Bearer tokens in HTTP headers, OAuth refresh tokens, or other credential formats that LiteLLM may include in error context.",
+      "recommendation": "Add to Task 6: 'grader.py must catch all LiteLLM and API exceptions internally and re-raise a sanitized, typed GradingError(message: str) containing only a safe summary (e.g., \"LLM API call failed: <HTTP status code>\"). No raw exception text, HTTP response bodies, or request headers should propagate out of grader.py.' Expand the sanitization pattern in Task 7 to also strip lines containing 'Authorization:', 'Bearer ', and 'token' followed by non-whitespace strings of >20 chars."
+    },
+    {
+      "owasp_category": "A05-Security Misconfiguration",
+      "severity": "warning",
+      "location": "Task 4 / src/drive.py — GDrive URL and folder ID validation",
+      "issue": "This issue was identified in round 1 and is still not addressed in the updated spec. Task 4 requires extracting a folder ID from an operator-supplied Google Drive URL and calling the Drive API, but does not require validating the URL format or the extracted folder ID. An operator pasting a file URL (not a folder), a non-Drive URL, or a URL with an unexpected structure will cause a confusing Drive API error that may include the full URL (with any embedded tokens) in the exception message. More critically, there is no requirement to validate that the extracted folder_id matches the expected Drive ID format (26-33 alphanumeric characters). Passing an arbitrary string to the Drive API list call is unnecessary risk.",
+      "recommendation": "Add to Task 4: '(1) Validate the GDrive URL matches the expected pattern https://drive.google.com/drive/folders/{ID} (or /u/N/ variant) before making any API call. (2) Validate the extracted folder_id is a non-empty string matching [a-zA-Z0-9_-]{10,50} before use. (3) Return a clear validation error to the caller (not a raw API exception) if either check fails.' Add acceptance criterion: 'Entering a non-Drive URL or a file URL shows a validation error and does not call the Drive API.'"
+    },
+    {
+      "owasp_category": "A03-Injection",
+      "severity": "warning",
+      "location": "src/grader.py / LLM prompt construction — criteria JSON field injection",
+      "issue": "This issue was identified in round 1 and is still not addressed. Grading prompts are built dynamically from criteria JSON fields (description, condition, correct_answers) at runtime per Decision 3. These fields are operator-uploaded but could contain prompt injection payloads if a criteria file is corrupted or comes from an untrusted source. The spec has no field length limits, no content validation for control characters, and no acknowledgment of this risk in the Risks table.",
+      "recommendation": "Choose one of: (1) Add to criteria_loader.py validation: 'String fields (description, condition, correct_answers items) must not exceed 500 characters and must not contain newline characters that could break prompt structure.' (2) Alternatively, add an explicit entry to the Risks table: 'Prompt injection via malicious criteria JSON: accepted risk for MVP — criteria files are operator-supplied on a local machine; mitigated by criteria_loader validation of filename and schema structure.' Either resolves this finding."
+    },
+    {
+      "owasp_category": "A06-Vulnerable Components",
+      "severity": "warning",
+      "location": "Dependencies section / requirements.txt",
+      "issue": "This issue was identified in round 1 and is still not addressed. All dependencies use >= minimum version constraints (e.g., litellm>=1.40, PyMuPDF>=1.24, streamlit>=1.36). This means pip install can pull in any future major version, including breaking changes or newly introduced vulnerabilities. PyMuPDF in particular parses untrusted PDF content from Drive. The spec does not mention a lock file, pip-compile, or pip-audit for vulnerability scanning.",
+      "recommendation": "Add to Task 1: 'Generate requirements.txt with pinned exact versions using pip-compile (pip-tools). Add pip-audit to pre-commit hooks alongside gitleaks to scan for known CVEs in dependencies on each commit.' Add to Acceptance Criteria: 'pip-audit reports 0 high-severity CVEs against installed dependencies.'"
+    },
+    {
+      "owasp_category": "other",
+      "severity": "info",
+      "location": "Task 7 / error sanitization — regex gap for UI display path",
+      "issue": "Task 7 sanitizes error messages before storing in students.error_message. Task 11 (exporter + error list display on Main screen) reads error_message from DB and displays it in the Streamlit UI error list. Since sanitization happens at write time (Task 7), what is displayed should already be clean. However, Task 11 has no explicit requirement to treat error_message as untrusted display content. If Streamlit renders error_message with st.markdown() instead of st.text(), any markdown or HTML-like content in error messages could cause unexpected rendering (not XSS in the traditional sense for a local app, but potentially confusing output). This is low-severity given the local single-operator context.",
+      "recommendation": "Add to Task 11: 'Display error_message values using st.text() or st.code() rather than st.markdown() or st.write() to ensure error content is rendered as literal text, not parsed markdown.'"
+    }
+  ],
+  "specifically_addressed_questions": {
+    "q1_key_file_path_validation": "REMAINING ISSUE — Decision 6 correctly specifies key file location and permissions requirements, but Task 1 and app.py startup have no runtime validation that the env var value is an absolute path outside the repo. This is a new finding not present in round 1.",
+    "q2_secrets_in_streamlit_ui": "PARTIALLY ADDRESSED — Task 7 sanitizes before DB write, so the DB-stored error_message should be clean. However, Task 6 (grader.py) has no requirement to sanitize exceptions before they propagate to Task 7, and the sanitization pattern in Task 7 has gaps (Bearer tokens, OAuth tokens not covered). A grader error bypassing queue_processor could reach the UI unsanitized. Flagged as warning.",
+    "q3_sqlite_wal_mode": "FULLY ADDRESSED — Decision 1 now explicitly mandates WAL mode with PRAGMA journal_mode=WAL, and Task 2 requires init_db() to enable it. No remaining issue.",
+    "q4_wave_restructuring_new_issues": "ONE NEW ISSUE — The wave split between Task 6 (grader, Wave 3) and Task 7 (queue_processor, Wave 4) creates a gap: error sanitization is only specified in Task 7, but secrets can originate in Task 6. Task 6 has no requirement to sanitize or wrap exceptions before propagating. Flagged as warning.",
+    "q5_other_remaining_issues": "THREE ROUND-1 WARNINGS STILL OPEN — GDrive URL validation, prompt injection via criteria JSON, and dependency pinning were identified in round 1 and remain unaddressed in the updated spec."
+  },
+  "summary": "0 critical issues (both round-1 criticals are fixed). 4 warnings: (1) key file path not validated at startup — relative path could land inside repo undetected; (2) grader.py has no exception sanitization before propagating to queue_processor, and Task 7 sanitization pattern has gaps for Bearer/OAuth tokens; (3) GDrive URL and folder ID validation still missing from Task 4 (unresolved from round 1); (4) criteria JSON field injection still unacknowledged (unresolved from round 1). 1 informational: error_message should be rendered as literal text in Streamlit, not markdown. Dependency pinning (round-1 warning) remains unresolved. SQLite WAL mode is now fully addressed."
+}

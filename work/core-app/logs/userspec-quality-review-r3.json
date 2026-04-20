@@ -1,0 +1,12 @@
+{
+  "overall": "fail",
+  "critical_findings": [],
+  "minor_findings": [
+    {
+      "id": "QR3-1",
+      "location": "Section 'Как проверить' > 'Пользователь проверяет', bullet 2",
+      "issue": "States 'выделение проблемного поля видно' (bounding-box highlight is visible), which contradicts CA-17 that explicitly specifies full page display with no bounding-box highlighting in MVP.",
+      "recommendation": "Replace 'выделение проблемного поля видно' with wording consistent with CA-17, e.g. 'номер задания указан рядом со сканом страницы'."
+    }
+  ]
+}

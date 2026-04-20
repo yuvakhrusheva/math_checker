@@ -1,0 +1,109 @@
+{
+  "validator": "mirage-detector",
+  "round": 2,
+  "status": "fail",
+  "previously_fixed": [
+    "pages/ directory now in architecture (Architecture section lists pages/criteria_management.py, pages/main.py, pages/review_panel.py)",
+    "streamlit version bumped to >=1.36 (confirmed in Dependencies section)",
+    "deployment.md reference removed from Task 1 Files to read",
+    "google-auth-httplib2>=0.2 added to Dependencies",
+    "polling timer clarified: st.fragment(run_every=2) now in Decision 1 and Task 9"
+  ],
+  "findings": [
+    {
+      "id": "R2-C1",
+      "severity": "critical",
+      "status": "new",
+      "location": "Testing Strategy — test_db.py / Data Models — task_results DDL",
+      "issue": "The test_db.py spec says 'Verify `task_results` has UNIQUE constraint on `(student_id, task_number)` to prevent duplicate saves.' However, the task_results DDL in the Data Models section defines NO such UNIQUE constraint — only an autoincrement INTEGER PRIMARY KEY. The test will fail because the constraint it is trying to verify does not exist in the schema definition. This is a spec-internal inconsistency: the test expects a constraint the schema does not define.",
+      "recommendation": "Add `UNIQUE(student_id, task_number)` to the task_results DDL, or alternatively change the constraint to be on `ON CONFLICT REPLACE` or use an upsert pattern in the CRUD layer. Either the DDL must be updated to include the constraint, or the test description must be changed to match the schema as written."
+    },
+    {
+      "id": "R2-W1",
+      "severity": "warning",
+      "status": "remaining from round 1 — not fixed",
+      "location": "Task 5 — pdf_processor.py description / PyMuPDF API",
+      "issue": "Task 5 says 'render each page to JPEG at 150 DPI' but never specifies the PyMuPDF API call. The correct modern API for PyMuPDF >= 1.24 is `pix = page.get_pixmap(dpi=150)` followed by `jpeg_bytes = pix.tobytes('jpeg')`. The deprecated camelCase methods (`page.getPixmap()`, `pix.getPNGdata()`) were removed in PyMuPDF 1.24. Without explicit guidance, an implementing agent may use the wrong method or produce PNG instead of JPEG (which matters for base64 payload size sent to the vision LLM).",
+      "recommendation": "Add a note to Task 5 or the pdf_processor architecture entry specifying the exact API: `pix = page.get_pixmap(dpi=150)` and `jpeg_bytes = pix.tobytes('jpeg')`."
+    },
+    {
+      "id": "R2-W2",
+      "severity": "warning",
+      "status": "remaining from round 1 — not fixed",
+      "location": "Task 4 — drive.py, Google Drive file download method",
+      "issue": "Task 4 says to 'download PDFs to data/downloads/{cohort_id}/' but never specifies the Drive API method. The correct approach is `service.files().get_media(fileId=file_id)` combined with `googleapiclient.http.MediaIoBaseDownload`. Using `service.files().get(fileId=file_id).execute()` returns metadata JSON only, not file content — a common mistake that produces empty/corrupt downloaded files with no error raised.",
+      "recommendation": "Explicitly state in Task 4 that file download must use `service.files().get_media(fileId=file_id)` with `MediaIoBaseDownload`, not `service.files().get()`."
+    },
+    {
+      "id": "R2-W3",
+      "severity": "warning",
+      "status": "remaining from round 1 — not fixed",
+      "location": "Task 6 — grader.py / LiteLLM vision API — multi-image message format",
+      "issue": "Decision 2 and Task 6 describe sending all page images in a single multi-image LLM message, but nowhere in the spec is the actual LiteLLM message format shown. For litellm >= 1.40 (OpenAI-compatible vision), each image must be a separate content block: `{\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/jpeg;base64,<b64>\"}}` inside the `content` list of the user message. An implementing agent unaware of this format might pass images as separate messages, as raw base64 strings, or using the wrong content structure — all of which will cause API errors or silent failures.",
+      "recommendation": "Add a code snippet or explicit format description in Task 6 or the LLM contract section showing the multi-image message structure: a single user message with `content` as a list containing text block(s) and multiple image_url blocks."
+    },
+    {
+      "id": "R2-W4",
+      "severity": "warning",
+      "status": "remaining from round 1 — not fixed",
+      "location": "Testing Strategy — integration tests / TEST_GDRIVE_FOLDER_ID fixture",
+      "issue": "Integration tests require `TEST_GDRIVE_FOLDER_ID` env var pointing to a real GDrive folder with exactly 5 specific PDFs (3 processable, 1 returning confidence=low, 1 unreadable). This test fixture folder is not created by any task, not documented in .env.example, and has no provisioning instructions anywhere in the spec. The integration tests cannot pass without this fixture, and no agent task is responsible for setting it up.",
+      "recommendation": "Add `TEST_GDRIVE_FOLDER_ID` to `.env.example` with a comment explaining the required folder structure. Add setup instructions to the integration test file or Task 4 describing how to provision the test Drive folder."
+    },
+    {
+      "id": "R2-I1",
+      "severity": "info",
+      "status": "remaining from round 1 — not fixed",
+      "location": "LLM Response Schema vs. task_results DDL — field name mismatch",
+      "issue": "The LLM Response Schema defines a field `'notes'` in each task object, but the task_results table stores this as `grading_notes`. The grader.py must explicitly map `notes` → `grading_notes` on parse. This mapping is implicit and not documented anywhere. An implementing agent may store it under `notes` (missing column) or drop it silently.",
+      "recommendation": "Add an explicit note in Task 6 or the Data Models section that the LLM response field `'notes'` maps to the `task_results.grading_notes` column."
+    },
+    {
+      "id": "R2-I2",
+      "severity": "info",
+      "status": "new",
+      "location": "user-spec Verification Plan vs. tech-spec AVP — Playwright reference",
+      "issue": "The user-spec 'Как проверить' table (steps 1 and 2) lists 'Playwright / Streamlit test' as the tool for UI verification of the Criteria Management screen and Add Cohort form. However, the tech-spec Agent Verification Plan explicitly states 'No Streamlit UI automation — UI verified manually by user', and Playwright is not listed in dependencies anywhere. This creates a cross-document inconsistency: the user-spec implies automated UI testing that the tech-spec has explicitly decided against.",
+      "recommendation": "Update the user-spec verification steps 1 and 2 to say 'manual UI verification' instead of 'Playwright / Streamlit test', to align with the tech-spec AVP decision."
+    },
+    {
+      "id": "R2-I3",
+      "severity": "info",
+      "status": "remaining from round 1 — not fixed",
+      "location": "Task 3 — criteria files / answer key source documents",
+      "issue": "Task 3 requires creating 4 initial criteria JSON files based on 'answer key documents provided by the operator before first use', but these documents have no defined path, are not in the repository, and no task provisions them. An agent executing Task 3 cannot create valid criteria content without the actual answer keys.",
+      "recommendation": "Either add answer key documents to `work/core-app/references/` before Task 3 runs, or change Task 3 to create stub/placeholder criteria files with a note that real values must be filled in manually."
+    },
+    {
+      "id": "R2-I4",
+      "severity": "info",
+      "status": "new",
+      "location": "Data Models — cohorts table / in_project field",
+      "issue": "The cohorts table DDL defines `in_project INTEGER NOT NULL DEFAULT 1` (a boolean flag), but this field is never referenced in any query, export logic, queue processor logic, UI description, or acceptance criterion in the spec. It appears to be an orphaned column with no specified behavior — no task reads it, filters on it, or sets it to 0.",
+      "recommendation": "Either document what `in_project` means and which component reads/writes it (e.g., if it is meant to filter cohorts shown in the queue), or remove it from the DDL to avoid dead schema."
+    }
+  ],
+  "api_checks": {
+    "pymupdf_fitz": {
+      "verdict": "unresolved — API not specified in spec",
+      "correct_modern_api": "pix = page.get_pixmap(dpi=150); jpeg_bytes = pix.tobytes('jpeg')",
+      "notes": "PyMuPDF >= 1.24 removes all deprecated camelCase methods. The spec does not show the API call, leaving implementation ambiguous."
+    },
+    "google_drive_v3_download": {
+      "verdict": "unresolved — download method not specified in spec",
+      "correct_api": "service.files().get_media(fileId=file_id) + MediaIoBaseDownload",
+      "wrong_api": "service.files().get(fileId=file_id).execute() — returns metadata only",
+      "notes": "The distinction between get() and get_media() is critical and not mentioned anywhere in the spec."
+    },
+    "litellm_vision_multiimage": {
+      "verdict": "unresolved — message format not specified in spec",
+      "correct_format": "messages=[{\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"...\"}, {\"type\": \"image_url\", \"image_url\": {\"url\": \"data:image/jpeg;base64,<b64>\"}}, ...]}]",
+      "notes": "litellm >= 1.40 uses OpenAI-compatible vision format. Spec only says 'multi-image LLM message' without showing the structure."
+    },
+    "st_fragment_run_every": {
+      "verdict": "pass — API is correct for streamlit >= 1.36",
+      "notes": "st.fragment with run_every parameter was included in the stable 1.36.0 release (promoted from experimental). st.fragment(run_every=2) used as @st.fragment(run_every=2) decorator is valid syntax. No mirage."
+    }
+  },
+  "summary": "1 new critical (UNIQUE constraint in test_db.py has no corresponding DDL definition), 3 remaining warnings (PyMuPDF API unspecified, Drive get_media unspecified, LiteLLM vision format unspecified), 1 remaining warning (test Drive fixture unprovisioned), 1 remaining info (notes→grading_notes field mapping), 2 new info (Playwright cross-doc inconsistency, in_project orphaned column), 1 remaining info (criteria answer keys missing). st.fragment(run_every=2) confirmed correct for streamlit>=1.36 — no mirage."
+}

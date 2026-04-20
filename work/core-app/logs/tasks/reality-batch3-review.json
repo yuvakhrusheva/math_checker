@@ -1,0 +1,45 @@
+{
+  "validator": "reality-checker",
+  "batch": 3,
+  "iteration": 1,
+  "status": "pass",
+  "findings": [
+    {
+      "task": 7,
+      "severity": "warning",
+      "issue": "Dependency label mismatch in Details section: 'Tasks 4 (db schema), 5 (drive.py), 6 (grader.py)' — but T4 is Google Drive integration, not db schema (T2 is db.py). The parenthetical labels are wrong even though the task numbers themselves are correct. An implementer reading only the Details section could be confused about what T4 provides.",
+      "recommendation": "Correct the Details dependency description to: 'Tasks 2 (db.py), 4 (drive.py), 5 (pdf_processor.py), 6 (grader.py) must be complete before this task starts.' Note: depends_on frontmatter currently lists [4, 5, 6] and omits T2 (db.py), which is also a required dependency used throughout the pipeline — consider adding it."
+    },
+    {
+      "task": 7,
+      "severity": "warning",
+      "issue": "Integration test ambiguity: the TDD anchor and description both state test_full_pipeline_5_students uses 'real Drive', but the implementation hint says 'may mock Drive/LLM calls for speed, but test_full_pipeline_5_students uses real Drive.' It is silent on whether the LLM must also be real. The tech-spec testing strategy explicitly requires: 'Assert that the LLM was actually called (not mocked) by checking recognized_answer is populated from the real scan.' The task hint's wording leaves the LLM mockable even in the full pipeline test, which contradicts the tech-spec.",
+      "recommendation": "Update the implementation hint to: 'test_full_pipeline_5_students uses real Drive AND real LLM (no mocks). All other tests may mock Drive/LLM for speed.' This aligns with the tech-spec integration test requirement."
+    },
+    {
+      "task": 7,
+      "severity": "info",
+      "issue": "All specific checks pass: request_stop() is present at both module level and on the thread class. daemon=True is set via super().__init__(daemon=True). Error message sanitization covers sk-..., AIza..., and base64 sequences ≥40 chars. Resumability is explicitly handled (step 4: re-fetch student status, skip if not pending). Stop flag checked between students (not within pipeline steps) — documented in edge cases.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 8,
+      "severity": "info",
+      "issue": "All specific checks pass: file uploader present, grid display via list_available_combinations(), page registration in app.py explicitly required in both 'What to do' step 2 and Details. No automated TDD anchors — correctly acknowledged as intentional (UI delegates to criteria_loader already tested in T3). depends_on: [3] is correct.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 9,
+      "severity": "info",
+      "issue": "All specific checks pass: @st.fragment(run_every=2) is used for the progress section. Start Processing button is disabled=queue_processor.is_running(). Edit/Delete are rendered only for status=pending cohorts, and the edge cases section reinforces 'Edit/Delete buttons must check status at render time'. Page registered in app.py. depends_on: [7, 8] is correct (Wave 5 after Wave 4).",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 9,
+      "severity": "info",
+      "issue": "No TDD anchors defined — this is acceptable. The task is a pure UI orchestration layer with no novel logic (all business logic lives in db.py, queue_processor.py, criteria_loader.py). Manual verification steps (Verify-user) cover the key scenarios adequately.",
+      "recommendation": "No action needed."
+    }
+  ],
+  "summary": "Tasks 7, 8, 9 are realistic, adequately scoped, and internally consistent. Two warnings on T7: (1) the Details dependency labels mis-identify T4 as 'db schema' when T4 is Drive integration (T2 is db.py), and depends_on frontmatter omits T2 which is a real dependency; (2) the implementation hint is ambiguous about whether the LLM must be real in test_full_pipeline_5_students, contradicting the tech-spec requirement for a non-mocked integration test. All specific checks pass for all three tasks: T7 has request_stop(), daemon thread, sanitization, and resumability; T8 handles both file uploader and grid display and registers in app.py; T9 uses st.fragment(run_every=2), disables Start Processing when running, and blocks edit for non-pending cohorts."
+}

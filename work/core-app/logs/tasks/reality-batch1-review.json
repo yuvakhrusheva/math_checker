@@ -1,0 +1,72 @@
+{
+  "validator": "reality-checker",
+  "batch": 1,
+  "iteration": 1,
+  "status": "pass",
+  "findings": [
+    {
+      "task": 1,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task description mentions 'Google Sheets sync' in the second sentence ('Everything downstream (LLM grading, Google Sheets sync, PDF processing)...') but no Google Sheets sync exists in this project — only Google Drive integration. This is a copy/paste misnomer in the description prose, not in any functional requirement.",
+      "recommendation": "Minor: update description sentence to say 'Google Drive access' instead of 'Google Sheets sync'. Does not affect implementation."
+    },
+    {
+      "task": 1,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 1 calls init_db() in app.py before src/db.py exists (created in Task 2). The app.py written in Task 1 will import init_db from src.db, but that module is empty/absent until Task 2 completes. This means 'streamlit run app.py' in Task 1's smoke check will fail with an ImportError unless init_db is stubbed.",
+      "recommendation": "Task 1 should either: (a) create a stub src/db.py with an empty init_db() as part of this task's scope, or (b) guard the import in app.py so it only fails at call time, not import time. Since the smoke check 'streamlit run app.py starts without import errors' is a T1 AC, a stub is needed. This is a minor scope gap — not critical because the agent can resolve it inline, but worth flagging."
+    },
+    {
+      "task": 1,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 1's AC for .gitignore includes 'criteria/' (the entire directory). However, the criteria/ directory is tracked by git in the repo structure (Task 3 creates loader code, operators upload files there). Excluding criteria/ entirely from git means criteria JSON files uploaded by operators will never be version-tracked. Tech-spec does not specify ignoring criteria/ — only data/ and .env are obvious ignore candidates. The gitignore entry for criteria/ appears intentional for a local-only tool but is worth confirming.",
+      "recommendation": "Confirm with user whether criteria JSON files should be gitignored. If yes, the .gitignore entry is correct. If they should be tracked (e.g. for reproducibility), remove criteria/ from .gitignore. No blocker — implementation matches stated AC."
+    },
+    {
+      "task": 2,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 2's CRUD function list omits 'update_student_name' (recognized_name field). The grader sets recognized_name after LLM processing, and queue_processor will need to persist it. There is no save/update function for recognized_name or detected_variant update in the listed CRUD — only update_student_variant is listed. The recognized_name write path is missing.",
+      "recommendation": "Add update_student_recognized_name(id, recognized_name) to the CRUD list in Task 2, or expand update_student_status to also accept optional recognized_name. This is a warning — queue_processor (Task 7) will need this and may have to work around it if not present."
+    },
+    {
+      "task": 2,
+      "type": "inconsistency",
+      "severity": "warning",
+      "issue": "Task 2 TDD anchor test 'test_save_task_result_unique_constraint' verifies UNIQUE(student_id, task_number). The DDL in the task file includes this constraint correctly. The tech-spec DDL also includes it. Both are consistent — no issue with the constraint itself. However, the TDD anchor description says 'saving same student_id+task_number twice raises IntegrityError' — this is correct behavior, but the test should also verify that the UPSERT/INSERT OR REPLACE pattern used by queue_processor for resumability (re-running skips processed students) doesn't accidentally bypass the constraint. The task does not mention whether save_task_result should use INSERT or INSERT OR REPLACE/ON CONFLICT. This could cause a silent bug in resumability.",
+      "recommendation": "Clarify in the Details section whether save_task_result should use plain INSERT (raises on duplicate, caller must guard) or INSERT OR IGNORE/ON CONFLICT IGNORE (idempotent). Given the resumability requirement (CA-8), the queue_processor checks student status before calling grader — so plain INSERT is correct if the caller already guards. Add a note to this effect."
+    },
+    {
+      "task": 2,
+      "type": "info",
+      "severity": "info",
+      "issue": "WAL mode: Task 2 says 'WAL mode must be enabled on every connection' and implementation hint says to set it in get_connection(). This is correct and aligns with tech-spec Decision 1. AC verifies it at the function level but there is no automated test for WAL mode being set — the smoke check only verifies the module imports and init_db runs. The test_db.py TDD anchors do not include a WAL mode test.",
+      "recommendation": "Add a test (e.g., test_wal_mode_enabled) that opens a connection via get_connection() and queries 'PRAGMA journal_mode' to assert it returns 'wal'. Low severity — WAL mode is easy to forget and has no runtime error if missing, only concurrent-access failures."
+    },
+    {
+      "task": 3,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 3 'Files to modify' lists four criteria JSON files (grade2_ru_v1.json, grade2_ru_v2.json, grade3_ru_v1.json, grade3_ru_v2.json) but the task description explicitly states these files are created by the operator via the UI, not by this task. This contradiction between the file list and the description is noted in the previous template review (template-batch1-review.json) and is intentional. The agent executing Task 3 must understand to NOT create these files.",
+      "recommendation": "For clarity, remove the four criteria JSON files from 'Files to modify' and add a note: 'These files are created at runtime by operators via the Criteria Management UI — do not create them in this task.' The contradiction is a potential source of confusion for an executing agent."
+    },
+    {
+      "task": 3,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 3 has no smoke check (verify: [] in frontmatter). All other Wave 2 tasks have smoke checks. This is acceptable since criteria_loader has no external dependencies to verify (no DB, no network), but a simple smoke check like 'python -c \"from src.criteria_loader import list_available_combinations; print(list_available_combinations())\"' would improve confidence.",
+      "recommendation": "Consider adding a minimal smoke check. Not a blocker."
+    },
+    {
+      "task": 3,
+      "type": "info",
+      "severity": "info",
+      "issue": "Task 3 implementation hint uses 'Path.resolve()' and 'str.startswith(str(criteria_dir.resolve()))' for path traversal protection. This approach has a subtle edge case: if criteria_dir resolves to '/foo/criteria' and the attacker passes '/foo/criteria_evil/file.json', startswith would incorrectly allow it. The standard fix is to append os.sep: startswith(str(criteria_dir.resolve()) + os.sep) or use Path.is_relative_to() (Python 3.9+).",
+      "recommendation": "Update the implementation hint to use Path.is_relative_to() (Python 3.9+) or append os.sep to the prefix check. The test 'test_save_path_traversal_blocked' covers the basic ../../ case but may not catch the sibling-directory edge case."
+    }
+  ],
+  "summary": "Tasks 1-3 are realistic, adequately specified, and internally consistent. All dependencies are correctly declared. Key specific checks pass: T1 lists all required dependencies from tech-spec and mentions pages/ folder; T2 includes UNIQUE constraint in DDL and WAL mode; T3 mentions path traversal protection and filename/content validation. Eight info/warning findings logged, none critical. The most actionable items are: (1) T1 needs a src/db.py stub to satisfy its own smoke check AC; (2) T2 is missing an update function for recognized_name; (3) T3 file list contradicts task description regarding criteria JSON files; (4) T3 path traversal hint has a subtle edge case with sibling-named directories."
+}
