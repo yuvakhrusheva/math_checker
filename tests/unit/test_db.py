@@ -37,8 +37,6 @@ def patch_db_path(tmp_path, monkeypatch):
     """Redirect every test to an isolated temporary DB file."""
     db_file = tmp_path / "test_math_checker.db"
     monkeypatch.setattr(db_module, "DB_PATH", str(db_file))
-    # Also patch the data dir creation to point at tmp_path
-    monkeypatch.setattr(db_module, "DATA_DIR", str(tmp_path))
     yield db_file
 
 

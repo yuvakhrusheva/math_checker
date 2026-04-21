@@ -1,0 +1,32 @@
+{
+  "task": "Task 2: Database layer",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "src/db.py:5-6",
+      "issue": "DATA_DIR constant is defined but never used. get_connection() already creates the directory via Path(DB_PATH).parent.mkdir(), making DATA_DIR redundant dead code.",
+      "suggestion": "Remove DATA_DIR or refactor get_connection() to use it: Path(DATA_DIR).mkdir(parents=True, exist_ok=True)."
+    },
+    {
+      "severity": "warning",
+      "location": "src/db.py:66-72",
+      "issue": "init_db() calls PRAGMA journal_mode=WAL twice: once inside get_connection() and once explicitly after executescript. The second call is redundant.",
+      "suggestion": "Remove the explicit conn.execute('PRAGMA journal_mode=WAL') from init_db() since get_connection() already sets it."
+    },
+    {
+      "severity": "info",
+      "location": "src/db.py:119-140",
+      "issue": "update_cohort_metadata uses a whitelist + f-string for the SET clause, which is correct and safe. The noqa comment is helpful. Consider adding a note that this is intentionally not parameterized for field names.",
+      "suggestion": "No change required — pattern is acceptable with existing whitelist guard."
+    },
+    {
+      "severity": "info",
+      "location": "src/db.py:168",
+      "issue": "update_student_status signature uses str | None union syntax (Python 3.10+). The project uses Python 3.11 so this is fine, but worth noting for consistency.",
+      "suggestion": "No change needed."
+    }
+  ]
+}

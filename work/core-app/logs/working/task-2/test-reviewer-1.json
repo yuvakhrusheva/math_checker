@@ -1,0 +1,26 @@
+{
+  "task": "Task 2: Database layer",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "tests/unit/test_db.py:40-42",
+      "issue": "patch_db_path fixture patches DATA_DIR but DATA_DIR is never used in the implementation — only DB_PATH matters. The DATA_DIR patch is a no-op and may mislead future maintainers.",
+      "suggestion": "Remove the DATA_DIR monkeypatch line since it has no effect. DB_PATH patching is sufficient for isolation."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_db.py",
+      "issue": "All 7 TDD anchors from the task spec are present and correctly test their respective behaviors. test_save_task_result_unique_constraint goes beyond the anchor by also verifying the raw INSERT raises IntegrityError — good extra coverage.",
+      "suggestion": "No change required."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_db.py",
+      "issue": "Missing coverage for: update_student_recognized_name, update_student_variant, list_students_by_cohort, update_task_result, get_task_results with multiple results, list_cohorts. These are not TDD anchor requirements but improve confidence.",
+      "suggestion": "Add tests in a follow-up or in a later task's test suite if these functions become critical paths."
+    }
+  ]
+}

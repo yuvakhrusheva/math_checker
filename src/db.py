@@ -2,7 +2,6 @@
 import sqlite3
 from pathlib import Path
 
-DATA_DIR = "data"
 DB_PATH = "data/math_checker.db"
 
 _SCHEMA = """
@@ -68,7 +67,6 @@ def init_db() -> None:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript(_SCHEMA)
-        conn.execute("PRAGMA journal_mode=WAL")
 
 
 # ---------------------------------------------------------------------------

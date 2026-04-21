@@ -84,6 +84,14 @@ def test_validate_invalid_filename_format():
         validate_criteria_file(filename, content)
 
 
+def test_validate_invalid_json():
+    """Invalid JSON content raises ValueError."""
+    from src.criteria_loader import validate_criteria_file
+
+    with pytest.raises(ValueError, match="(?i)json"):
+        validate_criteria_file("grade3_ru_v1.json", b"this is not json {{")
+
+
 # ---------------------------------------------------------------------------
 # save_criteria_file tests
 # ---------------------------------------------------------------------------
@@ -178,3 +186,15 @@ def test_criteria_exists_false(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     assert criteria_exists(2, "az") is False
+
+
+def test_load_criteria_missing_file(monkeypatch, tmp_path):
+    """load_criteria raises FileNotFoundError when the file does not exist."""
+    from src.criteria_loader import load_criteria
+
+    criteria_dir = tmp_path / "criteria"
+    criteria_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        load_criteria(3, "ru", 1)

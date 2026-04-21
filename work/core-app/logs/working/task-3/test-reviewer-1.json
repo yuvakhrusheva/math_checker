@@ -1,0 +1,32 @@
+{
+  "task": "Task 3: Criteria JSON loader",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/unit/test_criteria_loader.py",
+      "issue": "All 7 TDD anchors from the task spec are present and pass. test_save_writes_file is a bonus test that verifies the happy path of save_criteria_file.",
+      "suggestion": "No change required."
+    },
+    {
+      "severity": "warning",
+      "location": "tests/unit/test_criteria_loader.py",
+      "issue": "Missing test for invalid JSON content in validate_criteria_file (e.g. content=b'not json'). This is a real failure mode when operators upload malformed files.",
+      "suggestion": "Add: test_validate_invalid_json — pass b'not valid json' to validate_criteria_file, expect ValueError."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_criteria_loader.py",
+      "issue": "Missing test for load_criteria FileNotFoundError. The function's contract includes this behavior.",
+      "suggestion": "Add: test_load_criteria_missing_file — call load_criteria(3, 'ru', 1) with empty criteria dir, expect FileNotFoundError."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_criteria_loader.py",
+      "issue": "Test isolation uses monkeypatch.chdir(tmp_path) to redirect CRITERIA_DIR. This works correctly but is CWD-sensitive. An alternative is to monkeypatch src.criteria_loader.CRITERIA_DIR directly (like test_db.py does with DB_PATH) which is more explicit.",
+      "suggestion": "Either approach is valid. monkeypatch.chdir is simpler for this case."
+    }
+  ]
+}
