@@ -1,0 +1,150 @@
+{
+  "recognized_student_name": "Алиев Айдын",
+  "detected_variant": 1,
+  "tasks": [
+    {
+      "task_number": 1,
+      "page_number": 1,
+      "recognized_answer": "93, 309, 390, 930",
+      "score": 4,
+      "max_score": 4,
+      "confidence": "high",
+      "notes": "Все числа расставлены в правильном порядке по возрастанию"
+    },
+    {
+      "task_number": 2,
+      "page_number": 1,
+      "recognized_answer": "456",
+      "score": 3,
+      "max_score": 3,
+      "confidence": "high",
+      "notes": "Верный ответ: 456"
+    },
+    {
+      "task_number": 3,
+      "page_number": 1,
+      "recognized_answer": "12",
+      "score": 0,
+      "max_score": 4,
+      "confidence": "low",
+      "notes": "Неразборчивый ответ, похоже на 12, но уверенность низкая"
+    },
+    {
+      "task_number": 4,
+      "page_number": 1,
+      "recognized_answer": "прямоугольник",
+      "score": 2,
+      "max_score": 2,
+      "confidence": "high",
+      "notes": "Правильный ответ"
+    },
+    {
+      "task_number": 5,
+      "page_number": 2,
+      "recognized_answer": "720",
+      "score": 4,
+      "max_score": 4,
+      "confidence": "high",
+      "notes": "Задача решена правильно, ответ 720"
+    },
+    {
+      "task_number": 6,
+      "page_number": 2,
+      "recognized_answer": "48",
+      "score": 3,
+      "max_score": 3,
+      "confidence": "high",
+      "notes": "Правильное решение задачи на умножение"
+    },
+    {
+      "task_number": 7,
+      "page_number": 2,
+      "recognized_answer": "",
+      "score": 0,
+      "max_score": 2,
+      "confidence": "high",
+      "notes": "Ответ отсутствует"
+    },
+    {
+      "task_number": 8,
+      "page_number": 2,
+      "recognized_answer": "треугольник",
+      "score": 0,
+      "max_score": 2,
+      "confidence": "high",
+      "notes": "Ответ неверный, ожидался квадрат"
+    },
+    {
+      "task_number": 9,
+      "page_number": 3,
+      "recognized_answer": "25",
+      "score": 4,
+      "max_score": 4,
+      "confidence": "high",
+      "notes": "Правильно: 5×5=25"
+    },
+    {
+      "task_number": 10,
+      "page_number": 3,
+      "recognized_answer": "100",
+      "score": 3,
+      "max_score": 3,
+      "confidence": "high",
+      "notes": "Верный результат"
+    },
+    {
+      "task_number": 11,
+      "page_number": 3,
+      "recognized_answer": "367",
+      "score": 0,
+      "max_score": 4,
+      "confidence": "low",
+      "notes": "Сложно разобрать цифры, возможно 367 или 387"
+    },
+    {
+      "task_number": 12,
+      "page_number": 3,
+      "recognized_answer": "56",
+      "score": 2,
+      "max_score": 2,
+      "confidence": "high",
+      "notes": "Правильно"
+    },
+    {
+      "task_number": 13,
+      "page_number": 4,
+      "recognized_answer": "18, 24, 36",
+      "score": 4,
+      "max_score": 4,
+      "confidence": "high",
+      "notes": "Все три числа верны и в правильном порядке"
+    },
+    {
+      "task_number": 14,
+      "page_number": 4,
+      "recognized_answer": "500",
+      "score": 3,
+      "max_score": 3,
+      "confidence": "high",
+      "notes": "Задача решена верно: 5×100=500"
+    },
+    {
+      "task_number": 15,
+      "page_number": 4,
+      "recognized_answer": "9",
+      "score": 0,
+      "max_score": 2,
+      "confidence": "low",
+      "notes": "Неясно написано, может быть 9 или 4"
+    },
+    {
+      "task_number": 16,
+      "page_number": 4,
+      "recognized_answer": "84",
+      "score": 4,
+      "max_score": 4,
+      "confidence": "high",
+      "notes": "Правильно: 7×12=84"
+    }
+  ]
+}
