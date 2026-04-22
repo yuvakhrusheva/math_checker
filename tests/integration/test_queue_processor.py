@@ -202,6 +202,14 @@ class TestResumability:
         # Only 2 LLM calls — pre-processed students skipped
         assert llm_call_count["n"] == 2
 
+        # Any requires_review student must have review_status='pending' set
+        for sid in (s4, s5):
+            row = db.get_student(sid)
+            if row["status"] == "requires_review":
+                assert row["review_status"] == "pending", (
+                    f"Student {sid} is requires_review but review_status={row['review_status']!r}"
+                )
+
 
 class TestRequestStopHaltsProcessing:
     def test_request_stop_halts_processing(self, db_path, tmp_path):

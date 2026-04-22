@@ -186,6 +186,33 @@ def test_save_task_result_unique_constraint():
 # TDD Anchor 7: list_requires_review returns only requires_review students
 # ---------------------------------------------------------------------------
 
+def test_set_review_pending():
+    """set_review_pending sets review_status='pending'."""
+    db_module.init_db()
+    cohort_id = db_module.create_cohort(**_make_cohort_kwargs())
+    student_id = db_module.create_student(cohort_id, "f1", "s.pdf")
+
+    db_module.set_review_pending(student_id)
+
+    row = db_module.get_student(student_id)
+    assert row["review_status"] == "pending"
+
+
+def test_mark_student_reviewed():
+    """mark_student_reviewed sets status='processed' and review_status='done'."""
+    db_module.init_db()
+    cohort_id = db_module.create_cohort(**_make_cohort_kwargs())
+    student_id = db_module.create_student(cohort_id, "f1", "s.pdf")
+    db_module.update_student_status(student_id, "requires_review")
+    db_module.set_review_pending(student_id)
+
+    db_module.mark_student_reviewed(student_id)
+
+    row = db_module.get_student(student_id)
+    assert row["status"] == "processed"
+    assert row["review_status"] == "done"
+
+
 def test_list_requires_review():
     db_module.init_db()
     cohort_id = db_module.create_cohort(**_make_cohort_kwargs())
