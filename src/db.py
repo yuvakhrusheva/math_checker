@@ -202,6 +202,24 @@ def list_requires_review() -> list:
         ).fetchall()
 
 
+def set_review_pending(student_id: int) -> None:
+    """Set review_status='pending' (called when student is marked requires_review)."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE students SET review_status = 'pending' WHERE id = ?",
+            (student_id,),
+        )
+
+
+def mark_student_reviewed(student_id: int) -> None:
+    """Mark student as done with review: status='processed', review_status='done'."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE students SET status = 'processed', review_status = 'done' WHERE id = ?",
+            (student_id,),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Task results
 # ---------------------------------------------------------------------------

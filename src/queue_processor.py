@@ -212,6 +212,8 @@ class ProcessingThread(threading.Thread):
         # Step 6: Determine and set final status
         final_status = _determine_student_status(result)
         db.update_student_status(student_id, final_status)
+        if final_status == "requires_review":
+            db.set_review_pending(student_id)
         return False
 
 
