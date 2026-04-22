@@ -52,3 +52,15 @@ class TestPdfToImages:
         bad_pdf.write_bytes(b"this is not a pdf at all %%%")
         with pytest.raises(UnreadablePDFError):
             pdf_to_images(str(bad_pdf))
+
+    def test_zero_page_pdf_raises_unreadable(self):
+        """0-page document → UnreadablePDFError (mocked fitz)."""
+        from unittest.mock import patch, MagicMock
+        from src.pdf_processor import pdf_to_images, UnreadablePDFError
+        mock_doc = MagicMock()
+        mock_doc.page_count = 0
+        mock_doc.__enter__ = lambda s: s
+        mock_doc.__exit__ = MagicMock(return_value=False)
+        with patch("src.pdf_processor.fitz.open", return_value=mock_doc):
+            with pytest.raises(UnreadablePDFError, match="0 pages"):
+                pdf_to_images("fake.pdf")

@@ -138,12 +138,12 @@ def download_pdf(
     dest_path = dest_dir / safe_name
 
     try:
-        request = service.files().get_media(fileId=file_id)
+        request = _call_with_backoff(lambda: service.files().get_media(fileId=file_id))
         buf = io.BytesIO()
         downloader = MediaIoBaseDownload(buf, request)
         done = False
         while not done:
-            _, done = _call_with_backoff(downloader.next_chunk)
+            _, done = downloader.next_chunk()
         dest_path.write_bytes(buf.getvalue())
         return dest_path, None
     except Exception as exc:

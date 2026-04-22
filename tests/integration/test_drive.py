@@ -98,6 +98,40 @@ class TestFilenameSanitization:
 # Integration tests — require real Google Drive credentials
 # ---------------------------------------------------------------------------
 
+class TestDownloadPdfFailure:
+    """Unit test for CA-14: download failure returns error dict, does not raise."""
+
+    def test_download_failure_returns_error_dict(self, tmp_path):
+        """download_pdf returns (None, error_dict) when Drive raises an error."""
+        from src.drive import download_pdf
+        from unittest.mock import MagicMock
+        from googleapiclient.errors import HttpError
+
+        mock_service = MagicMock()
+        # Simulate HttpError on get_media
+        fake_resp = MagicMock()
+        fake_resp.status = 403
+        error = HttpError(resp=fake_resp, content=b"Forbidden")
+        mock_service.files().get_media.side_effect = error
+
+        path, err = download_pdf(mock_service, "file123", "test.pdf", 1, tmp_path)
+        assert path is None
+        assert err is not None
+        assert err["file_id"] == "file123"
+        assert "error" in err
+
+    def test_list_pdfs_empty_folder(self):
+        """list_pdfs returns [] when folder has no PDFs."""
+        from src.drive import list_pdfs
+        from unittest.mock import MagicMock
+
+        mock_service = MagicMock()
+        mock_service.files().list().execute.return_value = {"files": []}
+
+        result = list_pdfs(mock_service, "folder123")
+        assert result == []
+
+
 class TestGetService:
     @integration
     def test_get_service_success(self):

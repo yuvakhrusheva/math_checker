@@ -1,0 +1,20 @@
+{
+  "task": "Task 5: PDF processor",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "src/pdf_processor.py",
+      "issue": "Module is clean, concise, and correct. fitz.open failures are caught and re-raised as UnreadablePDFError. doc.close() is always called via try/finally. DPI matrix is correct (150/72). Page numbers are 1-based. JPEG encoding via pix.tobytes('jpeg') is correct.",
+      "suggestion": "No changes needed."
+    },
+    {
+      "severity": "info",
+      "location": "src/pdf_processor.py:_DPI_MATRIX",
+      "issue": "Module-level constant for the DPI matrix is a good pattern — avoids recreating it for every page.",
+      "suggestion": "No change needed."
+    }
+  ]
+}

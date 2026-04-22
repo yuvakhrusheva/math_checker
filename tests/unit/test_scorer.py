@@ -61,21 +61,16 @@ class TestZeroCredit:
 
 
 class TestPartialCredit:
-    def test_partial_credit(self):
-        """Partial tier match → partial score."""
+    def test_zero_credit_with_partial_tier_present(self):
+        """Wrong answer returns 0 even when a partial tier exists (tier lookup hits zero)."""
         from src.scorer import compute_score
-        # The tier-based scorer returns the top matching tier score.
-        # For partial tier we test that a "partial" tier is selected when appropriate.
-        # Since scorer is tier-based and compares against correct_answers,
-        # partial scoring requires a partial_match answer.
-        # We use answer_type="numeric" with a partial answer that matches the partial tier label.
         tiers = [
             {"score": 4, "label": "full", "condition": "Exact: 15"},
             {"score": 2, "label": "partial", "condition": "Partial credit"},
             {"score": 0, "label": "zero", "condition": "Wrong"},
         ]
         criteria = make_criteria("numeric", ["15"], tiers)
-        # Wrong answer → goes through tiers, doesn't match full, hits zero
+        # Wrong answer → doesn't match correct_answers, falls to zero tier
         score, _ = compute_score("10", criteria)
         assert score == 0
 

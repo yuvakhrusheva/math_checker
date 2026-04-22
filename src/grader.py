@@ -21,6 +21,9 @@ _SETTINGS_PATH = Path(__file__).parent.parent / "config" / "settings.json"
 def _load_settings() -> dict:
     return json.loads(_SETTINGS_PATH.read_text(encoding="utf-8"))
 
+# Cached settings — settings.json is static, no need to re-read on every call
+_SETTINGS: dict = _load_settings()
+
 
 _SYSTEM_PROMPT = (
     "You are a math grader for Azerbaijani school students (grades 2-3). "
@@ -116,7 +119,7 @@ def grade_student(
         json.JSONDecodeError: If the LLM returns non-JSON output.
         Any litellm exception: propagated to caller (queue_processor handles it).
     """
-    settings = _load_settings()
+    settings = _SETTINGS
     prompt_text = build_prompt(criteria, pages)
 
     # Build image content blocks
