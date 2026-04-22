@@ -103,6 +103,37 @@ def db_path(tmp_path, monkeypatch):
     return db_file
 
 
+class TestUnreadablePdfSetsUnreadableStatus:
+    def test_unreadable_pdf_sets_unreadable_status(self, db_path, tmp_path):
+        """UnreadablePDFError from pdf_processor → student status=unreadable."""
+        import src.db as db
+        from src.queue_processor import ProcessingThread
+        from src.pdf_processor import UnreadablePDFError
+
+        db.init_db()
+        cohort_id = db.create_cohort(**_make_cohort_kwargs())
+        student_id = db.create_student(cohort_id, "bad_file", "corrupt.pdf")
+
+        fake_pdf_path = tmp_path / "corrupt.pdf"
+        fake_pdf_path.write_bytes(b"not a pdf")
+        mock_service = MagicMock()
+
+        with patch("src.queue_processor.drive.get_service", return_value=mock_service), \
+             patch("src.queue_processor.drive.download_pdf",
+                   return_value=(fake_pdf_path, None)), \
+             patch("src.queue_processor.pdf_processor.pdf_to_images",
+                   side_effect=UnreadablePDFError("PDF is corrupted")), \
+             patch("src.queue_processor.criteria_loader.load_criteria",
+                   return_value={"tasks": [], "grade": 3, "language": "ru", "variant": 1}):
+
+            thread = ProcessingThread()
+            thread.start()
+            thread.join(timeout=15)
+
+        row = db.get_student(student_id)
+        assert row["status"] == "unreadable"
+
+
 class TestDownloadErrorSetsErrorStatus:
     def test_download_error_sets_error_status(self, db_path):
         """Invalid file_id → student status=error, error_message set."""

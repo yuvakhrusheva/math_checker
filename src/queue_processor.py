@@ -10,9 +10,12 @@ Public API:
     request_stop()  — signal thread to stop after current student finishes
 """
 import json
+import logging
 import re
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import src.db as db
 import src.drive as drive
@@ -117,6 +120,7 @@ class ProcessingThread(threading.Thread):
                 self._process_cohort(cohort, service)
             except Exception as exc:
                 # Cohort-level failure: mark done_with_errors and continue
+                logger.exception("Cohort %s failed with unexpected error", cohort["id"])
                 db.update_cohort_status(cohort["id"], "done_with_errors")
 
     def _process_cohort(self, cohort, service) -> None:
