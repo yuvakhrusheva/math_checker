@@ -147,6 +147,48 @@ All findings addressed in fix commit 01c21e8.
 - `pytest tests/unit/test_grader.py -v` → 7 passed
 - `python -c "from src.grader import build_prompt; p=build_prompt({'tasks':[]}, []); print('Prompt OK')"` → Prompt OK
 
+## Task 12: Code Audit
+
+**Status:** Done
+**Commit:** 641b378
+**Agent:** main agent
+**Summary:** Reviewed all src/, pages/, app.py, and tests/ files. No critical issues found. Key warnings: N+1 query in exporter.py per student (performance at scale), variant=1 default in queue_processor (known, documented in T7), and criteria re-loaded on every Streamlit rerun in review_panel. Full report at logs/code-audit.md.
+**Deviations:** None
+
+**Reviews:** No reviewers assigned.
+
+**Verification:**
+- Report written to logs/code-audit.md
+- No critical issues → no fixer task spawned
+
+## Task 13: Security Audit
+
+**Status:** Done
+**Commit:** 641b378
+**Agent:** main agent
+**Summary:** Audited OWASP Top 10 focus areas. No critical vulnerabilities. Key warnings: PyMuPDF processes untrusted PDFs without file size limit (low risk given teacher-controlled Drive source), and no file size cap on Drive downloads. All SQL queries parameterized, path traversal blocked on both upload and PDF access, error sanitizer covers all key formats. gitleaks pre-commit hook passed all commits. Full report at logs/security-audit.md.
+**Deviations:** None — gitleaks binary not accessible in shell, hook validation used as practical control.
+
+**Reviews:** No reviewers assigned.
+
+**Verification:**
+- Report written to logs/security-audit.md
+- gitleaks pre-commit hook: passed on all commits
+
+## Task 14: Test Audit
+
+**Status:** Done
+**Commit:** 641b378
+**Agent:** main agent
+**Summary:** Reviewed all 10 test files (101 tests pass, 4 skipped). No critical gaps. Added 2 missing DB function tests (set_review_pending, mark_student_reviewed) and a review_status assertion to the resumability integration test. Test pyramid balanced (86% unit, 14% integration). Full report at logs/test-audit.md.
+**Deviations:** None
+
+**Reviews:** No reviewers assigned.
+
+**Verification:**
+- Report written to logs/test-audit.md
+- `pytest tests/ -q` → 101 passed, 4 skipped
+
 ## Task 9: Main screen UI (cohort queue)
 
 **Status:** Done
