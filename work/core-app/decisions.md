@@ -54,6 +54,43 @@ All findings addressed in fix commit 01c21e8.
 - `python -c "import streamlit, litellm, fitz, google.oauth2; print('OK')"` → OK
 - gitleaks pre-commit hook → installed and passed on commit
 
+## Task 7: Queue processor with background threading
+
+**Status:** Done
+**Commit:** c8eb671
+**Agent:** main agent
+**Summary:** Implemented ProcessingThread (daemon=True) with threading.Event stop flag, full student pipeline (download → pdf → grade → status), resumability (skip non-pending students), error message sanitization (sk-/AIza/ya29/Bearer/base64 patterns), and module-level start/is_running/request_stop singleton. Also added get_next_pending_cohort to db.py. After review: added logging for cohort-level failures, added UnreadablePDF path test.
+**Deviations:** Used variant=1 as default criteria for all cohorts; the queue processor re-loads criteria per detected_variant is deferred to a future improvement since the LLM detects variant post-grading.
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 2 warnings (silent cohort exceptions, empty-cohort comment), 2 infos → [logs/working/task-7/code-reviewer-1.json]
+- security-auditor: 2 infos → [logs/working/task-7/security-auditor-1.json]
+- test-reviewer: 1 warning (missing unreadable PDF test), 1 info → [logs/working/task-7/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/integration/test_queue_processor.py -v -k "not full_pipeline"` → 10 passed, 1 skipped
+
+## Task 8: Criteria Management UI screen
+
+**Status:** Done
+**Commit:** c8eb671
+**Agent:** main agent
+**Summary:** Implemented pages/criteria_management.py with file uploader, validation via criteria_loader.save_criteria_file, st.success/st.error feedback, and a pandas DataFrame grid showing Grade 2/3 × RU/AZ with variant availability. Page already registered in app.py st.navigation from Task 1.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: OK → [logs/working/task-8/code-reviewer-1.json]
+- security-auditor: OK → [logs/working/task-8/security-auditor-1.json]
+- test-reviewer: OK → [logs/working/task-8/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_criteria_loader.py -v` → 9 passed
+- User verification: pending (requires running Streamlit locally)
+
 ## Task 4: Google Drive integration
 
 **Status:** Done
