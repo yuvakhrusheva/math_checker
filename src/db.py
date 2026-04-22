@@ -109,6 +109,14 @@ def list_cohorts() -> list:
         return conn.execute("SELECT * FROM cohorts ORDER BY created_at DESC").fetchall()
 
 
+def get_next_pending_cohort():
+    """Return the oldest cohort with status='pending', or None if there are none."""
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM cohorts WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+
+
 def update_cohort_status(cohort_id: int, status: str) -> None:
     with get_connection() as conn:
         conn.execute("UPDATE cohorts SET status = ? WHERE id = ?", (status, cohort_id))
