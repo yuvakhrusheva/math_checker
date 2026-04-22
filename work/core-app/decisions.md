@@ -54,6 +54,62 @@ All findings addressed in fix commit 01c21e8.
 - `python -c "import streamlit, litellm, fitz, google.oauth2; print('OK')"` → OK
 - gitleaks pre-commit hook → installed and passed on commit
 
+## Task 4: Google Drive integration
+
+**Status:** Done
+**Commit:** 60f75f3
+**Agent:** main agent
+**Summary:** Implemented src/drive.py with get_service, extract_folder_id, list_pdfs, download_pdf, and sanitize_filename. Supports both Drive URL formats (with/without /u/0/), pagination, rate-limit backoff (0.5s/1s/2s), and CA-14 non-raising download failures. Filename sanitization uses basename + unsafe-char replacement. After review: fixed backoff to not apply to stateful MediaIoBaseDownload.next_chunk(); added unit tests for download failure and empty folder.
+**Deviations:** Integration tests (real Drive) are skipped without TEST_GDRIVE_FOLDER_ID env var — documented in test file.
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 2 warnings (download_root relative path, backoff on stateful chunks) → [logs/working/task-4/code-reviewer-1.json]
+- security-auditor: 2 infos → [logs/working/task-4/security-auditor-1.json]
+- test-reviewer: 1 warning (missing CA-14 unit test), 1 info → [logs/working/task-4/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/integration/test_drive.py -v` → 14 passed, 3 skipped (unit + integration-skipped)
+
+## Task 5: PDF processor
+
+**Status:** Done
+**Commit:** 60f75f3
+**Agent:** main agent
+**Summary:** Implemented src/pdf_processor.py with UnreadablePDFError exception and pdf_to_images() that renders PDF pages at 150 DPI using fitz.Matrix(150/72, 150/72), encodes to JPEG base64, and returns 1-based (page_number, base64_string) tuples. Created sample.pdf (1-page) and sample_multi.pdf (3-page) fixtures via fitz. After review: added 0-page test using mock.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: OK → [logs/working/task-5/code-reviewer-1.json]
+- test-reviewer: 1 info (missing 0-page test) → [logs/working/task-5/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_pdf_processor.py -v` → 7 passed
+- `python -c "from src.pdf_processor import pdf_to_images; imgs=pdf_to_images('tests/fixtures/sample.pdf'); print(len(imgs), 'pages')"` → 1 pages
+
+## Task 6: LLM grader and scoring engine
+
+**Status:** Done
+**Commit:** 60f75f3
+**Agent:** main agent
+**Summary:** Implemented scorer.py (deterministic tier-based compute_score), grader.py (build_prompt + _parse_llm_response + grade_student via LiteLLM), and sample_response.json fixture with 16 realistic Azerbaijani school tasks. LLM 'notes' field renamed to 'grading_notes' in _parse_llm_response. Confidence-based requires_review determination left to queue_processor (T7) per spec. After review: settings.json now cached at module level.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 1 warning (settings re-read per call), 2 infos → [logs/working/task-6/code-reviewer-1.json]
+- security-auditor: OK → [logs/working/task-6/security-auditor-1.json]
+- test-reviewer: 1 warning (misleading partial-credit test name), 1 info → [logs/working/task-6/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_scorer.py -v` → 6 passed
+- `pytest tests/unit/test_grader.py -v` → 7 passed
+- `python -c "from src.grader import build_prompt; p=build_prompt({'tasks':[]}, []); print('Prompt OK')"` → Prompt OK
+
 ## Task 2: Database layer
 
 **Status:** Done
