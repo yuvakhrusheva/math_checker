@@ -147,6 +147,61 @@ All findings addressed in fix commit 01c21e8.
 - `pytest tests/unit/test_grader.py -v` → 7 passed
 - `python -c "from src.grader import build_prompt; p=build_prompt({'tasks':[]}, []); print('Prompt OK')"` → Prompt OK
 
+## Task 9: Main screen UI (cohort queue)
+
+**Status:** Done
+**Commit:** 7cf66a9
+**Agent:** main agent
+**Summary:** Implemented pages/main.py with cohort queue table, Add Cohort form (with criteria availability check CA-5 and GDrive URL validation), Edit/Delete for pending cohorts (soft-delete via in_project=0), Start Processing button (disabled when running), and @st.fragment(run_every=2) live progress section. Testable helpers extracted for unit testing. app.py already registered all pages from Task 1.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 2 warnings (delete used status=done instead of in_project=0, N+1 query pattern), 2 infos → [logs/working/task-9/code-reviewer-1.json]
+- test-reviewer: 1 info (patch target note — not a real bug since module references work correctly) → [logs/working/task-9/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_main_helpers.py -v` → 9 passed
+- User verification: pending (requires running Streamlit locally)
+
+## Task 10: Review Panel UI
+
+**Status:** Done
+**Commit:** 7cf66a9
+**Agent:** main agent
+**Summary:** Implemented pages/review_panel.py with path-traversal-guarded PDF path resolver, answer editing with immediate score recalculation (scorer.py), variant selector for null-variant students, and "Mark as Done" button. Added set_review_pending() and mark_student_reviewed() to db.py; queue_processor now sets review_status='pending' when marking students as requires_review.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 1 warning (apply_score_update triggered on every keystroke — acceptable for local app), 1 info → [logs/working/task-10/code-reviewer-1.json]
+- security-auditor: 1 info (path comparison on Windows uses realpath on both sides, correct) → [logs/working/task-10/security-auditor-1.json]
+- test-reviewer: 1 info → [logs/working/task-10/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_review_helpers.py -v` → 5 passed
+- User verification: pending (requires running Streamlit locally)
+
+## Task 11: Excel exporter and Export UI
+
+**Status:** Done
+**Commit:** 7cf66a9
+**Agent:** main agent
+**Summary:** Implemented src/exporter.py with _performance_level() helper and export() that queries students joined with cohorts, marks ERROR/PENDING rows, applies grade-3 performance levels, and writes timestamped .xlsx via openpyxl. Fixed SQL sort to use numeric class_number (not lexicographic string). Also treats requires_review students with NULL review_status as PENDING. pages/export.py provides Export button with download link and unreadable students list.
+**Deviations:** None
+
+**Reviews:**
+
+*Round 1:*
+- code-reviewer: 1 critical (SQL lexicographic sort fixed → numeric), 1 info → [logs/working/task-11/code-reviewer-1.json]
+- test-reviewer: 1 warning (PENDING check on both sheets added), 1 info → [logs/working/task-11/test-reviewer-1.json]
+
+**Verification:**
+- `pytest tests/unit/test_exporter.py -v` → 18 passed
+- Full suite → 99 passed, 4 skipped
+
 ## Task 2: Database layer
 
 **Status:** Done
