@@ -75,7 +75,7 @@ def export(output_dir: str = "exports") -> Path:
             FROM students s
             JOIN cohorts c ON s.cohort_id = c.id
             WHERE s.status != 'unreadable'
-            ORDER BY c.school, (c.class_number || c.class_letter), s.id
+            ORDER BY c.school, c.class_number, c.class_letter, s.id
             """
         ).fetchall()
 
@@ -85,8 +85,12 @@ def export(output_dir: str = "exports") -> Path:
     for student in students:
         sid = student["student_id"]
         is_error = student["status"] == "error"
-        is_pending = student["review_status"] == "pending"
-        # ERROR takes precedence over PENDING
+        # Treat requires_review students as pending regardless of whether
+        # review_status was explicitly set — ERROR takes precedence
+        is_pending = (
+            student["review_status"] == "pending"
+            or student["status"] == "requires_review"
+        )
         if is_error:
             marker = "ERROR"
         elif is_pending:

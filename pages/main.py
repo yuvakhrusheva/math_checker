@@ -114,8 +114,8 @@ def _render_cohort_table(cohorts):
                 if st.button("✏️", key=f"edit_{cohort['id']}", help="Edit"):
                     st.session_state[f"editing_{cohort['id']}"] = True
                 if st.button("🗑️", key=f"del_{cohort['id']}", help="Delete"):
-                    # Remove cohort (only pending — guard enforced by UI)
-                    db.update_cohort_status(cohort["id"], "done")  # soft-delete via status
+                    # Soft-delete: mark in_project=0 so cohort is hidden
+                    db.update_cohort_metadata(cohort["id"], in_project=0)
                     st.rerun()
 
         # Inline edit form
@@ -239,7 +239,7 @@ hdr[7].write("**Actions**")
 
 st.divider()
 
-cohorts = db.list_cohorts()
+cohorts = [c for c in db.list_cohorts() if c["in_project"]]
 _render_cohort_table(cohorts)
 
 st.divider()

@@ -197,6 +197,11 @@ class TestPendingReviewShowsPending:
         for t in range(1, 17):
             assert row[f"task_{t}_answer"] == "PENDING", f"task_{t}_answer should be PENDING"
 
+        df_scores = pd.read_excel(path, sheet_name="Scores")
+        row_s = df_scores[df_scores["student_id"] == sid].iloc[0]
+        for t in range(1, 17):
+            assert row_s[f"task_{t}_score"] == "PENDING", f"task_{t}_score should be PENDING"
+
 
 # ---------------------------------------------------------------------------
 # test_sort_order
@@ -262,6 +267,23 @@ class TestGrade3PerformanceLevels:
 # ---------------------------------------------------------------------------
 # test_grade2_performance_level_blank
 # ---------------------------------------------------------------------------
+
+class TestRequiresReviewNullReviewStatusIsPending:
+    def test_requires_review_null_review_status_shows_PENDING(self, db_env, tmp_path):
+        """requires_review student with NULL review_status shows PENDING (not real data)."""
+        db_module, _ = db_env
+        make_cohort, make_student = _setup_db(db_module, tmp_path)
+        cohort_id = make_cohort()
+        # review_status left as None (NULL in DB)
+        sid = make_student(cohort_id, status="requires_review", review_status=None)
+
+        from src.exporter import export
+        path = export(output_dir=str(tmp_path / "out"))
+
+        df = pd.read_excel(path, sheet_name="Answers")
+        row = df[df["student_id"] == sid].iloc[0]
+        assert row["task_1_answer"] == "PENDING"
+
 
 class TestGrade2PerformanceLevelBlank:
     def test_grade2_performance_level_blank(self, db_env, tmp_path):
