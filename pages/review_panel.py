@@ -98,6 +98,9 @@ def _render_task_image(pdf_path: Path, page_number: int) -> None:
 
 def _render_student(student, cohort) -> None:
     """Render review UI for a single student."""
+    # Convert sqlite3.Row to dict so .get() works uniformly
+    student = dict(student)
+    cohort = dict(cohort)
     label = (
         f"Student {student['id']}"
         + (f" — {student['recognized_name']}" if student.get("recognized_name") else "")
