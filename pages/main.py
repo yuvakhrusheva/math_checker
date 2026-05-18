@@ -39,8 +39,12 @@ def try_add_cohort(
     grade: int,
 ) -> tuple[int | None, str | None]:
     """
-    Validate inputs and create a new cohort.
+    Validate inputs, enumerate PDFs from the Drive folder, and create the
+    cohort together with one student row per PDF.
+
     Returns (cohort_id, None) on success or (None, error_message) on failure.
+    Drive enumeration runs before the cohort row is inserted, so an empty or
+    unreachable folder never leaves a dangling cohort behind.
     """
     url_error = validate_gdrive_url(gdrive_url)
     if url_error:
@@ -57,6 +61,18 @@ def try_add_cohort(
     except ValueError as exc:
         return None, f"Invalid Google Drive URL: {exc}"
 
+    try:
+        service = drive.get_service()
+        pdfs = drive.list_pdfs(service, folder_id)
+    except Exception as exc:
+        return None, f"Could not read Drive folder: {exc}"
+
+    if not pdfs:
+        return None, (
+            "No PDF files found in the Drive folder. "
+            "Check the URL and that the service account has access."
+        )
+
     cohort_id = db.create_cohort(
         gdrive_folder_url=gdrive_url,
         gdrive_folder_id=folder_id,
@@ -68,6 +84,8 @@ def try_add_cohort(
         test_date=str(test_date),
         grade=grade,
     )
+    for pdf in pdfs:
+        db.create_student(cohort_id, pdf["id"], pdf["name"])
     return cohort_id, None
 
 
@@ -189,7 +207,8 @@ def _render_add_form():
             if error:
                 st.error(f"Cannot add cohort: {error}")
             else:
-                st.success(f"Cohort added (ID {cohort_id})")
+                pdf_count = len(db.list_students_by_cohort(cohort_id))
+                st.success(f"Cohort added (ID {cohort_id}) — {pdf_count} PDFs queued")
                 st.rerun()
 
 

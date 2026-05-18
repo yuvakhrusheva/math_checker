@@ -211,6 +211,91 @@ class TestResumability:
                 )
 
 
+class TestVariantMismatchTriggersRegrade:
+    def test_detected_variant_2_regrades_with_v2_criteria(self, db_path, tmp_path):
+        """If LLM reports detected_variant=2, grade_student must be called a
+        second time with the variant-2 criteria, and those results are saved."""
+        import src.db as db
+        from src.queue_processor import ProcessingThread
+
+        db.init_db()
+        cohort_id = db.create_cohort(**_make_cohort_kwargs())
+        db.create_student(cohort_id, "f1", "s1.pdf")
+
+        fake_pdf_path = tmp_path / "student.pdf"
+        import shutil
+        shutil.copy(FIXTURE_PDF, fake_pdf_path)
+
+        v1_criteria = {"tasks": [], "grade": 3, "language": "ru", "variant": 1}
+        v2_criteria = {"tasks": [], "grade": 3, "language": "ru", "variant": 2}
+
+        def fake_load_criteria(grade, language, variant):
+            return v1_criteria if variant == 1 else v2_criteria
+
+        fixture_response = _load_llm_fixture()
+        # Force detected variant = 2 so re-grade is triggered
+        fixture_response = dict(fixture_response)
+        fixture_response["detected_variant"] = 2
+
+        calls = []
+
+        def mock_grade(pages, criteria):
+            calls.append(criteria["variant"])
+            return fixture_response
+
+        mock_service = MagicMock()
+
+        with patch("src.queue_processor.drive.get_service", return_value=mock_service), \
+             patch("src.queue_processor.drive.download_pdf",
+                   return_value=(fake_pdf_path, None)), \
+             patch("src.queue_processor.grader.grade_student", side_effect=mock_grade), \
+             patch("src.queue_processor.criteria_loader.load_criteria",
+                   side_effect=fake_load_criteria):
+
+            thread = ProcessingThread()
+            thread.start()
+            thread.join(timeout=30)
+
+        # First pass with v1, second (re-grade) with v2
+        assert calls == [1, 2]
+
+    def test_matching_variant_does_not_regrade(self, db_path, tmp_path):
+        """detected_variant == default → only one LLM call, no re-grade."""
+        import src.db as db
+        from src.queue_processor import ProcessingThread
+
+        db.init_db()
+        cohort_id = db.create_cohort(**_make_cohort_kwargs())
+        db.create_student(cohort_id, "f1", "s1.pdf")
+
+        fake_pdf_path = tmp_path / "student.pdf"
+        import shutil
+        shutil.copy(FIXTURE_PDF, fake_pdf_path)
+
+        fixture_response = _load_llm_fixture()  # detected_variant=1
+
+        calls = []
+
+        def mock_grade(pages, criteria):
+            calls.append(criteria["variant"])
+            return fixture_response
+
+        mock_service = MagicMock()
+
+        with patch("src.queue_processor.drive.get_service", return_value=mock_service), \
+             patch("src.queue_processor.drive.download_pdf",
+                   return_value=(fake_pdf_path, None)), \
+             patch("src.queue_processor.grader.grade_student", side_effect=mock_grade), \
+             patch("src.queue_processor.criteria_loader.load_criteria",
+                   return_value={"tasks": [], "grade": 3, "language": "ru", "variant": 1}):
+
+            thread = ProcessingThread()
+            thread.start()
+            thread.join(timeout=30)
+
+        assert calls == [1]
+
+
 class TestRequestStopHaltsProcessing:
     def test_request_stop_halts_processing(self, db_path, tmp_path):
         """request_stop() causes thread to stop after current student."""

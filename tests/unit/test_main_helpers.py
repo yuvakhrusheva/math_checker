@@ -60,15 +60,21 @@ class TestCriteriaCheckBlocksCohortAdd:
         assert len(db_module.list_cohorts()) == 0
 
     def test_valid_cohort_add_succeeds(self, tmp_path, monkeypatch):
-        """Valid inputs with criteria present → cohort created."""
+        """Valid inputs with criteria present → cohort created with a student row per PDF."""
         import src.db as db_module
         monkeypatch.setattr(db_module, "DB_PATH", str(tmp_path / "test.db"))
         db_module.init_db()
 
         from pages.main import try_add_cohort
 
+        pdfs = [
+            {"id": "file_1", "name": "student_01.pdf"},
+            {"id": "file_2", "name": "student_02.pdf"},
+        ]
         with patch("src.criteria_loader.criteria_exists", return_value=True), \
-             patch("src.drive.extract_folder_id", return_value="fake123"):
+             patch("src.drive.extract_folder_id", return_value="fake123"), \
+             patch("src.drive.get_service", return_value=object()), \
+             patch("src.drive.list_pdfs", return_value=pdfs):
             cohort_id, error = try_add_cohort(
                 gdrive_url="https://drive.google.com/drive/folders/fake123",
                 school="Test School",
@@ -83,6 +89,62 @@ class TestCriteriaCheckBlocksCohortAdd:
         assert error is None
         assert cohort_id is not None
         assert len(db_module.list_cohorts()) == 1
+        assert len(db_module.list_students_by_cohort(cohort_id)) == 2
+
+    def test_empty_drive_folder_blocks_cohort_add(self, tmp_path, monkeypatch):
+        """Drive folder with no PDFs → cohort is NOT created."""
+        import src.db as db_module
+        monkeypatch.setattr(db_module, "DB_PATH", str(tmp_path / "test.db"))
+        db_module.init_db()
+
+        from pages.main import try_add_cohort
+
+        with patch("src.criteria_loader.criteria_exists", return_value=True), \
+             patch("src.drive.extract_folder_id", return_value="fake123"), \
+             patch("src.drive.get_service", return_value=object()), \
+             patch("src.drive.list_pdfs", return_value=[]):
+            cohort_id, error = try_add_cohort(
+                gdrive_url="https://drive.google.com/drive/folders/fake123",
+                school="Test School",
+                teacher="Teacher A",
+                class_number=3,
+                class_letter="B",
+                language="ru",
+                test_date="2026-04-01",
+                grade=3,
+            )
+
+        assert cohort_id is None
+        assert error is not None
+        assert "No PDF files" in error
+        assert len(db_module.list_cohorts()) == 0
+
+    def test_drive_failure_blocks_cohort_add(self, tmp_path, monkeypatch):
+        """Drive API error → cohort is NOT created and the error surfaces."""
+        import src.db as db_module
+        monkeypatch.setattr(db_module, "DB_PATH", str(tmp_path / "test.db"))
+        db_module.init_db()
+
+        from pages.main import try_add_cohort
+
+        with patch("src.criteria_loader.criteria_exists", return_value=True), \
+             patch("src.drive.extract_folder_id", return_value="fake123"), \
+             patch("src.drive.get_service", side_effect=RuntimeError("boom")):
+            cohort_id, error = try_add_cohort(
+                gdrive_url="https://drive.google.com/drive/folders/fake123",
+                school="Test School",
+                teacher="Teacher A",
+                class_number=3,
+                class_letter="B",
+                language="ru",
+                test_date="2026-04-01",
+                grade=3,
+            )
+
+        assert cohort_id is None
+        assert error is not None
+        assert "Could not read Drive folder" in error
+        assert len(db_module.list_cohorts()) == 0
 
 
 # ---------------------------------------------------------------------------

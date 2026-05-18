@@ -109,28 +109,38 @@ def export(output_dir: str = "exports") -> Path:
             "test_date": student["test_date"],
             "student_id": sid,
         }
+        variant = student["detected_variant"] if student["detected_variant"] is not None else ""
+
+        # First compute total_score so it can go into score_row BEFORE task columns
+        total_score = 0.0
+        task_answers: dict[int, str] = {}
+        task_scores: dict[int, float | str] = {}
+        for t in _TASK_NUMS:
+            if marker:
+                task_answers[t] = marker
+                task_scores[t] = marker
+            else:
+                r = results.get(t)
+                task_answers[t] = r["recognized_answer"] if r else ""
+                task_score = float(r["score"]) if r else 0.0
+                task_scores[t] = task_score
+                total_score += task_score
 
         answer_row = dict(base)
         answer_row["recognized_name"] = student["recognized_name"] or ""
-        score_row = dict(base)
-
-        total_score = 0.0
+        answer_row["variant"] = variant
         for t in _TASK_NUMS:
-            if marker:
-                answer_row[f"task_{t}_answer"] = marker
-                score_row[f"task_{t}_score"] = marker
-            else:
-                r = results.get(t)
-                answer_row[f"task_{t}_answer"] = r["recognized_answer"] if r else ""
-                task_score = float(r["score"]) if r else 0.0
-                score_row[f"task_{t}_score"] = task_score
-                total_score += task_score
+            answer_row[f"task_{t}_answer"] = task_answers[t]
+
+        score_row = dict(base)
+        score_row["variant"] = variant
+        score_row["total_score"] = None if marker else total_score
+        for t in _TASK_NUMS:
+            score_row[f"task_{t}_score"] = task_scores[t]
 
         if marker:
-            score_row["total_score"] = None
             score_row["performance_level"] = ""
         else:
-            score_row["total_score"] = total_score
             grade = student["grade"]
             if grade == 3:
                 score_row["performance_level"] = _performance_level(total_score)
@@ -152,7 +162,8 @@ def export(output_dir: str = "exports") -> Path:
 
 def _empty_answers_df() -> pd.DataFrame:
     cols = (
-        ["school", "class", "teacher", "test_date", "student_id", "recognized_name"]
+        ["school", "class", "teacher", "test_date", "student_id",
+         "recognized_name", "variant"]
         + [f"task_{t}_answer" for t in _TASK_NUMS]
     )
     return pd.DataFrame(columns=cols)
@@ -160,8 +171,9 @@ def _empty_answers_df() -> pd.DataFrame:
 
 def _empty_scores_df() -> pd.DataFrame:
     cols = (
-        ["school", "class", "teacher", "test_date", "student_id"]
+        ["school", "class", "teacher", "test_date", "student_id",
+         "variant", "total_score"]
         + [f"task_{t}_score" for t in _TASK_NUMS]
-        + ["total_score", "performance_level"]
+        + ["performance_level"]
     )
     return pd.DataFrame(columns=cols)

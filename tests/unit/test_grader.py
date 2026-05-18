@@ -89,6 +89,24 @@ class TestMalformedJson:
             _parse_llm_response("This is not JSON at all {{{")
 
 
+class TestMarkdownFencesStripped:
+    def test_json_wrapped_in_json_fence_parses(self):
+        """Claude often wraps JSON in ```json ... ``` — must still parse."""
+        from src.grader import _parse_llm_response
+        fixture = load_fixture()
+        wrapped = f"```json\n{json.dumps(fixture)}\n```"
+        result = _parse_llm_response(wrapped)
+        assert result["detected_variant"] == 1
+
+    def test_json_wrapped_in_bare_fence_parses(self):
+        """Bare ``` fences (no language tag) must also be stripped."""
+        from src.grader import _parse_llm_response
+        fixture = load_fixture()
+        wrapped = f"```\n{json.dumps(fixture)}\n```"
+        result = _parse_llm_response(wrapped)
+        assert result["detected_variant"] == 1
+
+
 class TestNullVariant:
     def test_null_variant_flagged(self):
         """detected_variant=null → result carries None detected_variant."""

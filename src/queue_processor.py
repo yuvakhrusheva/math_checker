@@ -127,15 +127,21 @@ class ProcessingThread(threading.Thread):
         cohort_id = cohort["id"]
         db.update_cohort_status(cohort_id, "processing")
 
-        # Load criteria — start with variant 1 as default; LLM detects actual variant
-        # If LLM returns detected_variant=2, criteria will be reloaded per student
-        try:
-            default_criteria = criteria_loader.load_criteria(
-                grade=cohort["grade"],
-                language=cohort["language"],
-                variant=1,
-            )
-        except FileNotFoundError:
+        # Load criteria for every available variant of this grade+language.
+        # First grading pass uses the default variant (1 if present);
+        # if the LLM reports a different variant we re-grade with its criteria.
+        criteria_by_variant: dict[int, dict] = {}
+        for v in (1, 2):
+            try:
+                criteria_by_variant[v] = criteria_loader.load_criteria(
+                    grade=cohort["grade"],
+                    language=cohort["language"],
+                    variant=v,
+                )
+            except FileNotFoundError:
+                continue
+
+        if not criteria_by_variant:
             db.update_cohort_status(cohort_id, "done_with_errors")
             return
 
@@ -151,14 +157,14 @@ class ProcessingThread(threading.Thread):
             if fresh is None or fresh["status"] != "pending":
                 continue
 
-            error = self._process_student(fresh, service, default_criteria, cohort_id)
+            error = self._process_student(fresh, service, criteria_by_variant, cohort_id)
             if error:
                 has_errors = True
 
         final = "done_with_errors" if has_errors else "done"
         db.update_cohort_status(cohort_id, final)
 
-    def _process_student(self, student, service, criteria, cohort_id) -> bool:
+    def _process_student(self, student, service, criteria_by_variant, cohort_id) -> bool:
         """
         Run the full pipeline for one student.
         Returns True if an error occurred, False on success.
@@ -186,9 +192,10 @@ class ProcessingThread(threading.Thread):
                                      sanitize_error_message(str(exc)))
             return True
 
-        # Step 3: Grade via LLM
+        # Step 3: Grade via LLM. Default variant = 1 if available, else the only one.
+        default_variant = 1 if 1 in criteria_by_variant else next(iter(criteria_by_variant))
         try:
-            result = grader.grade_student(pages, criteria)
+            result = grader.grade_student(pages, criteria_by_variant[default_variant])
         except json.JSONDecodeError as exc:
             db.update_student_status(student_id, "error",
                                      sanitize_error_message(f"LLM response not valid JSON: {exc}"))
@@ -197,6 +204,24 @@ class ProcessingThread(threading.Thread):
             db.update_student_status(student_id, "error",
                                      sanitize_error_message(str(exc)))
             return True
+
+        # Step 3b: If the LLM detected a different variant and we have criteria
+        # for it, re-grade with the correct criteria. Otherwise every answer
+        # would be compared against the wrong answer key.
+        detected = result.get("detected_variant")
+        if (detected is not None
+                and detected != default_variant
+                and detected in criteria_by_variant):
+            try:
+                result = grader.grade_student(pages, criteria_by_variant[detected])
+            except json.JSONDecodeError as exc:
+                db.update_student_status(student_id, "error",
+                                         sanitize_error_message(f"LLM response not valid JSON: {exc}"))
+                return True
+            except Exception as exc:
+                db.update_student_status(student_id, "error",
+                                         sanitize_error_message(str(exc)))
+                return True
 
         # Step 4: Persist recognized name + variant
         if result.get("recognized_student_name"):

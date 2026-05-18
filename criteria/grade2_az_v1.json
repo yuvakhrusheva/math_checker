@@ -1,0 +1,412 @@
+{
+  "grade": 2,
+  "language": "az",
+  "variant": 1,
+  "total_max_score": 100,
+  "tasks": [
+    {
+      "task_number": 1,
+      "description": "Ədədlərin müqayisəsi. < və ya > işarəsini qoyun. Düzgün cavab: 47 < 74.",
+      "max_score": 4,
+      "answer_type": "text",
+      "correct_answers": [
+        "47 < 74"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Müqayisə işarəsi düzgündür: 47 < 74"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Müqayisə işarəsi yanlış və ya cavab yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 2,
+      "description": "Ədədlərin hasilini tapın. Düzgün cavab: 20.",
+      "max_score": 4,
+      "answer_type": "text",
+      "correct_answers": [
+        "20"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Düzgün cavab: 20"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 3,
+      "description": "Ədədin mərtəbə toplananlarına ayrılması (352 ədədi). Şagird cədvələ/sətrə yüzlüklərin, onluqların və təklərin rəqəmlərini yazır: 3, 5, 2 (3 yüzlük, 5 onluq, 2 təklik).",
+      "max_score": 4,
+      "answer_type": "text",
+      "correct_answers": [
+        "3, 5, 2",
+        "3,5,2",
+        "3 5 2"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Üç mərtəbənin rəqəmləri düzgün ardıcıllıqla göstərilib: 3 (yüzlük), 5 (onluq), 2 (təklik). Vergül, boşluq, cədvəl xətti — istənilən ayırıcı qəbul edilir."
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Heç olmasa bir rəqəm yanlış, ardıcıllıq pozulub və ya cavab yoxdur."
+        }
+      ]
+    },
+    {
+      "task_number": 4,
+      "description": "Onluğa tamamlamaqla toplama. Düzgün üsul: 47 + 3 = 50, 50 + 33 = 83. Cavab: 83. Meyarlar: 6 b. — düzgün tamamlama üsulu və düzgün cavab; 3 b. — üsul tətbiq edilib, lakin hesab səhvi var; 0 b. — üsul tətbiq edilməyib.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "83"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Onluğa tamamlama üsulu düzgündür və cavab 83-dır"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Tamamlama üsulu tətbiq edilib (onluğa keçid var), lakin yekunda hesab səhvi var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Tamamlama üsulu tətbiq edilməyib (onluğa keçid yoxdur)"
+        }
+      ]
+    },
+    {
+      "task_number": 5,
+      "description": "Yeni mərtəbə vahidi ayrılan hal üçün sütun şəklində çıxma. Nümunə: 73 − 38. Cavab: 35. Meyarlar: 6 b. — sütun şəklində düzgün yazılış və düzgün cavab; 3 b. — düzgün alqoritm, lakin hesab səhvi var; 0 b. — sütun şəklində yanlış yazı və ya alqoritm tətbiq edilməyib.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "35"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Sütun şəklində düzgün yazılış və düzgün cavab: 35"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Düzgün alqoritm, lakin hesab səhvi"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Yanlış yazılış və ya alqoritm tətbiq edilməyib"
+        }
+      ]
+    },
+    {
+      "task_number": 6,
+      "description": "Vurma və bölmənin qarşılıqlı əlaqəsi. Düzgün cavab: 54 - 9 = 45.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "54 - 9 = 45",
+        "54-9=45"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 54 - 9 = 45"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 7,
+      "description": "Qalığın müəyyən edilməsinə aid məsələ. Düzgün cavab: 5 man..",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "5 man.",
+        "5 manat",
+        "5"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 5 man."
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 8,
+      "description": "Verilmiş ədəddən 1 yüz böyük/kiçik ədədi tap. Düzgün cavab: 470.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "470"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 470"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 9,
+      "description": "Ədəd oxunda ədədin müəyyən edilməsi. Düzgün cavab: 250.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "250"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 250"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 10,
+      "description": "Piktoqramın oxunuşu. Düzgün cavab: 18.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "18"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 18"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 11,
+      "description": "Azalanı tapın. Düzgün cavab: 61.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "61"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 61"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 12,
+      "description": "Manatın qəpiklərə çevrilməsi. Düzgün cavab: 310 qəpik. Meyarlar: 6 b. — cəm düzgün tapılıb VƏ cavab qəpiklə yazılıb (310); 2 b. — cəm düzgün tapılıb, lakin cavab '3 manat 10 qəpik' kimi yazılıb; 0 b. — cəm yanlış tapılıb.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "310 qəp.",
+        "310 qəpik",
+        "310"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Cəm düzgün və cavab qəpiklə: 310"
+        },
+        {
+          "label": "partial",
+          "score": 2,
+          "condition": "Cəm düzgün, lakin cavab '3 manat 10 qəpik' formasında yazılıb"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cəm yanlış tapılıb"
+        }
+      ]
+    },
+    {
+      "task_number": 13,
+      "description": "Məsələyə görə ifadə yazılması. Düzgün ifadə: 4 ⋅ 8 = 32 (st.) və ya təkrar toplama. Cavab: 32 stul. Meyarlar: 4 b. — ifadə düzgün qurulub və düzgün hesablanıb; 2 b. — ifadə doğrudur, lakin hesab səhvi var; 0 b. — ifadə səhv qurulub. Cavaba görə: +2 b. — cavab izahla düzgün yazılıb.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "32 stul",
+        "32"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "İfadə düzgündür (4 ⋅ 8 = 32 (st.) və ya təkrar toplama), düzgün hesablanıb, izahla cavab: 32 stul"
+        },
+        {
+          "label": "partial",
+          "score": 4,
+          "condition": "İfadə düzgün, cavab düzgün (32), izah yoxdur"
+        },
+        {
+          "label": "partial2",
+          "score": 2,
+          "condition": "İfadə düzgün qurulub, lakin hesab səhvi var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "İfadə səhv qurulub"
+        }
+      ]
+    },
+    {
+      "task_number": 14,
+      "description": "İki addımlı məsələ. Həll: 1) 3 · 8 = 24 (ş.) — aldı; 2) 24 − 7 = 17 (ş.). Və ya: 3 · 8 − 7 = 17 (ş.). Cavab: 17 şar. Əməllərə görə: 4 b. — hər iki əməl izahlarla düzgündür; 2 b. — yalnız 1 əməl düzgündür; 0 b. — həll yanlışdır. İfadə ilə: 2 b. — ifadə və cavab düzgün; 1 b. — ifadə düzgün, hesab səhvi. Cavaba görə: +3 b. — cavab izahla düzgündür.",
+      "max_score": 9,
+      "answer_type": "text",
+      "correct_answers": [
+        "17 şar",
+        "17"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 9,
+          "condition": "Hər iki əməl izahlarla düzgün (və ya ifadə düzgün) + izahla cavab: 17 şar"
+        },
+        {
+          "label": "partial",
+          "score": 6,
+          "condition": "Hər iki əməl düzgün + cavab, lakin izah yoxdur"
+        },
+        {
+          "label": "partial2",
+          "score": 3,
+          "condition": "Yalnız 1 əməl düzgün, və ya ifadə düzgün lakin hesab səhvi"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Həll yanlış və ya yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 15,
+      "description": "Xərclər cədvəlinin təhlili. Məlumatlar: B.e. — 15, Ç.a. — 22, Ç. — 8, C.a. — 30, C. — 18. Düzgün cavab: ən çox cümə axşamı (C.a.) xərclənib (30 man.). İzah nümunəsi: 30 > 22 > 18 > 15 > 8. Meyarlar: cavaba görə 5 b. — gün düzgün göstərilib; izaha görə 4 b. — bütün ədədləri müqayisə etdi; 2 b. — izah natamam, lakin mənaca düzgün; 0 b. — izah yoxdur və ya səhvdir.",
+      "max_score": 9,
+      "answer_type": "text",
+      "correct_answers": [
+        "cümə axşamı",
+        "C.a.",
+        "cümə axşamı"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 9,
+          "condition": "Gün düzgün (cümə axşamı) + bütün ədədlərin müqayisəsi ilə tam izah"
+        },
+        {
+          "label": "partial",
+          "score": 7,
+          "condition": "Gün düzgün (cümə axşamı) + natamam, lakin mənaca düzgün izah"
+        },
+        {
+          "label": "partial2",
+          "score": 5,
+          "condition": "Gün düzgün (cümə axşamı), izah yoxdur"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Gün yanlış göstərilib"
+        }
+      ]
+    },
+    {
+      "task_number": 16,
+      "description": "Vurma və bölməyə aid məsələnin həlli. Həll: 1) 8 : 2 = 4 (l) — bir nəfər aldı; 2) 4 ⋅ 5 = 20 (l). Və ya: 8 : 2 ⋅ 5 = 20 (l). Cavab: 20 litr. Əməllərə görə: 4 b. — bütün əməllər izahlarla düzgündür; 2 b. — heç də bütün əməllər düzgün deyil və ya hesab səhvi var; 0 b. — həll səhvdir. İfadə ilə: 3 b. — ifadə və cavab düzgün; 1 b. — ifadə düzgün, hesab səhvi. Cavaba görə: +3 b.",
+      "max_score": 10,
+      "answer_type": "text",
+      "correct_answers": [
+        "20 litr",
+        "20 l",
+        "20"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 10,
+          "condition": "Bütün əməllər izahlarla düzgün (və ya ifadə düzgün) + izahla cavab: 20 litr"
+        },
+        {
+          "label": "partial",
+          "score": 7,
+          "condition": "Bütün əməllər düzgün + cavab, izah yoxdur"
+        },
+        {
+          "label": "partial2",
+          "score": 4,
+          "condition": "Heç də bütün əməllər düzgün deyil və ya hesab səhvi"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Həll səhvdir və ya yoxdur"
+        }
+      ]
+    }
+  ]
+}

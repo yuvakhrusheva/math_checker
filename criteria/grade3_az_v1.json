@@ -1,0 +1,419 @@
+{
+  "grade": 3,
+  "language": "az",
+  "variant": 1,
+  "total_max_score": 100,
+  "tasks": [
+    {
+      "task_number": 1,
+      "description": "Ədədləri sıralayın. Artan sıra ilə düzün. Düzgün cavab: 93, 309, 390, 930.",
+      "max_score": 4,
+      "answer_type": "ordered_list",
+      "correct_answers": [
+        "93, 309, 390, 930"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Ədədlər düzgün sıralanıb: 93, 309, 390, 930"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Sıra yanlışdır və ya cavab yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 2,
+      "description": "Rənglənmiş hissənin olduğu şəkli seçin. Vizual tapşırıq: şagird təklif olunan şəkillərdən birini seçir. Skanda göstərilən şəkildə hissənin düzgün rənglənib-rənglənmədiyini qiymətləndirin.",
+      "max_score": 4,
+      "answer_type": "text",
+      "correct_answers": [],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Hissənin düzgün rəngləndiyi şəkil seçilib"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Yanlış şəkil seçilib və ya cavab yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 3,
+      "description": "Əməlləri ardıcıllığına görə hesablayın. İfadə: 64 : 8 + 12 ⋅ 2. Düzgün cavab: 32. Meyarlar: 4 b. — düzgün cavab; 2 b. — aralıq əməllər düzgündür, amma yekun nəticədə xəta var; 0 b. — əməllər ardıcıllığı yanlışdır.",
+      "max_score": 4,
+      "answer_type": "text",
+      "correct_answers": [
+        "32"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 4,
+          "condition": "Əməllər ardıcıllığı düzgündür və cavab: 32"
+        },
+        {
+          "label": "partial",
+          "score": 2,
+          "condition": "Aralıq əməllər düzgündür, amma yekun nəticədə xəta var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Əməllər ardıcıllığı yanlışdır (məsələn, vurma/bölmədən əvvəl toplama)"
+        }
+      ]
+    },
+    {
+      "task_number": 4,
+      "description": "Sütun şəklində toplama. Düzgün cavab: 856. Meyarlar: 6 b. — sütun şəklində düzgün yazılış və düzgün cavab; 3 b. — alqoritm düzgündür, amma hesablamada səhv var; 0 b. — sütun şəklində yazılış və cavab səhvdir.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "856"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Sütun şəklində düzgün yazılış və düzgün cavab: 856"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Alqoritm düzgündür, amma hesablamada səhv var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Sütun şəklində yazılış və cavab səhvdir"
+        }
+      ]
+    },
+    {
+      "task_number": 5,
+      "description": "Mərtəbələrə ayırma yolu ilə vurma. Nümunə: 14 ⋅ 6 = (10 + 4) ⋅ 6 = 60 + 24 = 84. Düzgün cavab: 84. Meyarlar: 6 b. — ayırma düzgündür, hissələrin hasilləri və yekun nəticə düzgündür; 3 b. — ayırma və hissələrin hasilləri düzgündür, cəmdə səhv var; 2 b. — hasili sütunla vurma ilə tapıb; 0 b. — hissələrə ayırma tətbiq edilməyib.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "84"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün ayırma, hissələrin hasilləri və yekun: 84"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Ayırma və hissələrin hasilləri düzgündür, cəmdə səhv var"
+        },
+        {
+          "label": "partial2",
+          "score": 2,
+          "condition": "Hasili sütunla vurma ilə düzgün tapıb: 84"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Mərtəbələrə ayırma tətbiq edilməyib"
+        }
+      ]
+    },
+    {
+      "task_number": 6,
+      "description": "Ədədin hissəsini tapmaq. Düzgün cavab: 18.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "18"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 18"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 7,
+      "description": "Düzbucaqlının perimetri. Tərəflər: 7 sm və 5 sm. Düstur: 7 + 5 + 7 + 5 = 24 sm. Meyarlar: 6 b. — düstur düzgündür və cavab düzgündür; 3 b. — düstur düzgündür, hesablamada səhv var; 0 b. — perimetr düsturu tətbiq edilməyib.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "24 sm",
+        "24"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düstur düzgün və cavab düzgün: 24 sm"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Düstur düzgün, lakin hesab səhvi var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Perimetr düsturu tətbiq edilməyib"
+        }
+      ]
+    },
+    {
+      "task_number": 8,
+      "description": "Yeni mərtəbə vahidi ayrılan hal üçün sütun şəklində çıxma. Düzgün cavab: 464. Meyarlar: 6 b. — sütun şəklində keçidlə yazılış düzgündür və cavab düzgündür; 3 b. — alqoritm düzgündür, amma hesablamada səhv var; 0 b. — keçid alqoritmi tətbiq edilməyib.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "464"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Sütun şəklində keçidlə düzgün yazılış və düzgün cavab: 464"
+        },
+        {
+          "label": "partial",
+          "score": 3,
+          "condition": "Alqoritm düzgün, hesab səhvi var"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Keçid alqoritmi tətbiq edilməyib"
+        }
+      ]
+    },
+    {
+      "task_number": 9,
+      "description": "Qalıqlı bölmənin yoxlanması. Düzgün cavab: 3-cü mülahizə doğrudur, çünki 5 ⋅ 9 + 2 = 47.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "3",
+        "3)",
+        "3-cü"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün mülahizə seçilib (3: 5 ⋅ 9 + 2 = 47)"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Yanlış mülahizə seçilib"
+        }
+      ]
+    },
+    {
+      "task_number": 10,
+      "description": "Ən böyük cüt üçrəqəmli ədəd. Düzgün cavab: 998.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "998"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: 998"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 11,
+      "description": "Tənlik. Düzgün cavab: x = 9.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "9",
+        "x = 9",
+        "x=9"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün cavab: x = 9"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Cavab yanlışdır"
+        }
+      ]
+    },
+    {
+      "task_number": 12,
+      "description": "Düzbucaqlının məchul tərəfi. Həll: 20 : 2 = 10 (sm) — iki tərəf; 10 − 6 = 4 (sm). Və ya: 20 : 2 − 6 = 4 (sm). Cavab: 4 sm. Meyarlar: düzgün həll: 4 b., cavab: 2 b.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "4 sm",
+        "4"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Düzgün həll və cavab: 4 sm"
+        },
+        {
+          "label": "partial",
+          "score": 4,
+          "condition": "Düzgün həll, lakin cavab yazılmayıb və ya izah yoxdur"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Həll yanlış və ya yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 13,
+      "description": "Mötərizələr qoymaq. Düzgün cavab: 20 - 4 ⋅ (2 + 3) = 0.",
+      "max_score": 6,
+      "answer_type": "text",
+      "correct_answers": [
+        "20 - 4 ⋅ (2 + 3) = 0",
+        "20 - 4 * (2 + 3) = 0",
+        "20 - 4 · (2 + 3) = 0"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 6,
+          "condition": "Mötərizələr düzgün qoyulub: 20 - 4 ⋅ (2 + 3) = 0"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Mötərizələr yanlış qoyulub və ya cavab yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 14,
+      "description": "Kombinə olunmuş məsələ. Həll: 1) 4 ⋅ 6 = 24 (but.) — alındı; 2) 24 − 15 = 9 (but.) — qaldı; 3) 9 + 10 = 19 (but.). Və ya: 4 ⋅ 6 − 15 + 10 = 19. Cavab: 19 butulka. Əməllərə görə: 6 b. — 3 əməlin hər biri doğrudur və izahlar mövcuddur; 4 b. — 2 əməl doğrudur, 1-ində xəta var; 2 b. — yalnız 1 əməl doğrudur; 0 b. — həll yanlışdır. İfadə ilə: 6 b. — ifadə və cavab düzgün; 3 b. — ifadə düzgün, hesab səhvi. Cavaba görə: +3 b.",
+      "max_score": 9,
+      "answer_type": "text",
+      "correct_answers": [
+        "19 butulka",
+        "19"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 9,
+          "condition": "3 əməl izahlarla düzgün (və ya ifadə düzgün) + izahla cavab: 19 butulka"
+        },
+        {
+          "label": "partial",
+          "score": 7,
+          "condition": "3 əməl düzgün + cavab, lakin izah yoxdur; və ya 2 əməl düzgün + cavab"
+        },
+        {
+          "label": "partial2",
+          "score": 3,
+          "condition": "Yalnız 1 əməl düzgün, və ya ifadə düzgün lakin hesab səhvi"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Həll yanlış və ya yoxdur"
+        }
+      ]
+    },
+    {
+      "task_number": 15,
+      "description": "Xətti diaqramın təhlili. 2-ci həftədən 3-cü həftəyə qədər uzunluq 4 sm artdı (3-dən 7 sm-ə qədər) — bu, bir həftə ərzində ən böyük artımdır. Düzgün cavab: 3-cü həftə. Meyarlar: cavaba görə 5 b. — 3-cü həftə düzgün göstərilib; izaha görə 4 b. — bütün həftələr arasında artımların müqayisəsi var; 2 b. — izah natamam, lakin mənaca düzgün; 0 b. — izah yoxdur və ya səhvdir.",
+      "max_score": 9,
+      "answer_type": "text",
+      "correct_answers": [
+        "3-cü həftə",
+        "3-cü həftədə",
+        "3-cü"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 9,
+          "condition": "3-cü həftə düzgün + bütün artımların müqayisəsi ilə tam izah"
+        },
+        {
+          "label": "partial",
+          "score": 7,
+          "condition": "3-cü həftə düzgün + natamam, lakin mənaca düzgün izah"
+        },
+        {
+          "label": "partial2",
+          "score": 5,
+          "condition": "3-cü həftə düzgün, izah yoxdur"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Həftə yanlış göstərilib"
+        }
+      ]
+    },
+    {
+      "task_number": 16,
+      "description": "Kəsrlər və vurma üzrə məsələ. Həll: 1) 12 : 3 = 4 (k.) — bir qabda; 2) 4 ⋅ 6 = 24 (k.). Və ya: 12 : 3 ⋅ 6 = 24 (k.). Cavab: 24 konfet. Əməllərə görə: 6 b. — hər iki əməl izahı ilə düzgündür; 3 b. — 1-ci əməl düzgün, 2-ci əməldə səhv var; 0 b. — hissənin tapılması tətbiq edilməyib. İfadə ilə: 6 b. — ifadə və cavab düzgün; 3 b. — ifadə düzgün, hesab səhvi. Cavaba görə: +4 b.",
+      "max_score": 10,
+      "answer_type": "text",
+      "correct_answers": [
+        "24 konfet",
+        "24"
+      ],
+      "tiers": [
+        {
+          "label": "full",
+          "score": 10,
+          "condition": "Hər iki əməl izahı ilə düzgün (və ya ifadə düzgün) + izahla cavab: 24 konfet"
+        },
+        {
+          "label": "partial",
+          "score": 7,
+          "condition": "Hər iki əməl düzgün + cavab, izah yoxdur"
+        },
+        {
+          "label": "partial2",
+          "score": 3,
+          "condition": "Yalnız 1-ci əməl düzgün (hissə tapıldı), 2-ci əməldə səhv"
+        },
+        {
+          "label": "zero",
+          "score": 0,
+          "condition": "Hissənin tapılması tətbiq edilməyib"
+        }
+      ]
+    }
+  ]
+}

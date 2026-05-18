@@ -10,11 +10,16 @@ Key responsibilities:
 """
 import json
 import os
+import re
 from pathlib import Path
 
 import litellm
 
 from src.scorer import compute_score
+
+# Claude (and some other models) wrap JSON in markdown fences despite prompt
+# instructions. Match an optional ```json / ``` opener and closing ```.
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
 
 _SETTINGS_PATH = Path(__file__).parent.parent / "config" / "settings.json"
 
@@ -88,7 +93,11 @@ def _parse_llm_response(raw: str) -> dict:
     Renames the 'notes' field in each task to 'grading_notes' (DB column name).
     Raises json.JSONDecodeError if the response is not valid JSON.
     """
-    data = json.loads(raw)  # raises JSONDecodeError if not valid JSON
+    text = (raw or "").strip()
+    m = _FENCE_RE.match(text)
+    if m:
+        text = m.group(1).strip()
+    data = json.loads(text)  # raises JSONDecodeError if not valid JSON
 
     for task in data.get("tasks", []):
         # Rename notes → grading_notes

@@ -89,7 +89,7 @@ class TestTwoSheetsCreated:
 
 class TestAnswersSheetColumns:
     def test_answers_sheet_columns(self, db_env, tmp_path):
-        """Answers sheet has all required columns including 16 task answer columns."""
+        """Answers sheet has all required columns in the expected order."""
         db_module, _ = db_env
         make_cohort, make_student = _setup_db(db_module, tmp_path)
         cohort_id = make_cohort()
@@ -100,10 +100,10 @@ class TestAnswersSheetColumns:
 
         df = pd.read_excel(path, sheet_name="Answers")
         expected_cols = [
-            "school", "class", "teacher", "test_date", "student_id", "recognized_name",
+            "school", "class", "teacher", "test_date", "student_id",
+            "recognized_name", "variant",
         ] + [f"task_{i}_answer" for i in range(1, 17)]
-        for col in expected_cols:
-            assert col in df.columns, f"Missing column: {col}"
+        assert list(df.columns) == expected_cols
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,8 @@ class TestAnswersSheetColumns:
 
 class TestScoresSheetColumns:
     def test_scores_sheet_columns(self, db_env, tmp_path):
-        """Scores sheet has all required columns including total_score and performance_level."""
+        """Scores sheet has all required columns in the expected order
+        (variant + total_score come BEFORE per-task score columns)."""
         db_module, _ = db_env
         make_cohort, make_student = _setup_db(db_module, tmp_path)
         cohort_id = make_cohort()
@@ -122,11 +123,13 @@ class TestScoresSheetColumns:
         path = export(output_dir=str(tmp_path / "out"))
 
         df = pd.read_excel(path, sheet_name="Scores")
-        expected_cols = [
-            "school", "class", "teacher", "test_date", "student_id",
-        ] + [f"task_{i}_score" for i in range(1, 17)] + ["total_score", "performance_level"]
-        for col in expected_cols:
-            assert col in df.columns, f"Missing column: {col}"
+        expected_cols = (
+            ["school", "class", "teacher", "test_date", "student_id",
+             "variant", "total_score"]
+            + [f"task_{i}_score" for i in range(1, 17)]
+            + ["performance_level"]
+        )
+        assert list(df.columns) == expected_cols
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +286,44 @@ class TestRequiresReviewNullReviewStatusIsPending:
         df = pd.read_excel(path, sheet_name="Answers")
         row = df[df["student_id"] == sid].iloc[0]
         assert row["task_1_answer"] == "PENDING"
+
+
+class TestVariantAndTotalScoreColumns:
+    def test_variant_and_total_score_populated(self, db_env, tmp_path):
+        """detected_variant surfaces in both sheets; total_score equals sum of task scores."""
+        db_module, _ = db_env
+        make_cohort, make_student = _setup_db(db_module, tmp_path)
+        cohort_id = make_cohort(grade=3)
+        # make_student creates 16 tasks with score=1.0 each → expected total=16.0
+        sid = make_student(cohort_id, status="processed")
+        db_module.update_student_variant(sid, 2)
+
+        from src.exporter import export
+        path = export(output_dir=str(tmp_path / "out"))
+
+        df_a = pd.read_excel(path, sheet_name="Answers")
+        df_s = pd.read_excel(path, sheet_name="Scores")
+        row_a = df_a[df_a["student_id"] == sid].iloc[0]
+        row_s = df_s[df_s["student_id"] == sid].iloc[0]
+
+        assert row_a["variant"] == 2
+        assert row_s["variant"] == 2
+        assert float(row_s["total_score"]) == 16.0
+
+    def test_variant_blank_when_null(self, db_env, tmp_path):
+        """Students without detected_variant show blank, not a stray None/NaN label."""
+        db_module, _ = db_env
+        make_cohort, make_student = _setup_db(db_module, tmp_path)
+        cohort_id = make_cohort()
+        sid = make_student(cohort_id, status="processed")  # variant not set
+
+        from src.exporter import export
+        path = export(output_dir=str(tmp_path / "out"))
+
+        df_a = pd.read_excel(path, sheet_name="Answers")
+        val = df_a[df_a["student_id"] == sid].iloc[0]["variant"]
+        # blank (empty string) or NaN — both acceptable
+        assert val == "" or (val != val)
 
 
 class TestGrade2PerformanceLevelBlank:

@@ -53,4 +53,4 @@ temp/
 
 # math_checker specific
 data/
-criteria/
+# criteria/ — tracked in git (answer keys managed by team)
