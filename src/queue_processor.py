@@ -92,8 +92,8 @@ def _save_task_results(student_id: int, grading_result: dict) -> None:
             max_score=float(task.get("max_score", 0)),
             confidence=task.get("confidence", "low"),
             grading_notes=task.get("grading_notes", ""),
+            bbox=task.get("bbox"),
         )
-
 
 # ---------------------------------------------------------------------------
 # ProcessingThread
