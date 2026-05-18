@@ -62,17 +62,11 @@ class TestZeroCredit:
 
 class TestPartialCredit:
     def test_zero_credit_with_partial_tier_present(self):
-        """Wrong answer returns 0 even when a partial tier exists (tier lookup hits zero)."""
-        from src.scorer import compute_score
-        tiers = [
-            {"score": 4, "label": "full", "condition": "Exact: 15"},
-            {"score": 2, "label": "partial", "condition": "Partial credit"},
-            {"score": 0, "label": "zero", "condition": "Wrong"},
-        ]
-        criteria = make_criteria("numeric", ["15"], tiers)
-        # Wrong answer → doesn't match correct_answers, falls to zero tier
-        score, _ = compute_score("10", criteria)
-        assert score == 0
+        """Этот тест устарел: теперь wrong answer + partial tier зовёт LLM.
+        Новые тесты — в test_scorer_partial.py.
+        """
+        import pytest
+        pytest.skip("Поведение изменилось: см. test_scorer_partial.py")
 
 
 class TestEmptyAnswer:

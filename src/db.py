@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS task_results (
     confidence TEXT NOT NULL CHECK(confidence IN ('low', 'high')),
     grading_notes TEXT,
     manually_corrected INTEGER NOT NULL DEFAULT 0,
+    bbox TEXT,
     UNIQUE(student_id, task_number)
 );
 """
@@ -62,11 +63,25 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_bbox_column(conn: sqlite3.Connection) -> None:
+    """Idempotent migration: add bbox column to task_results if it's missing.
+
+    CREATE TABLE IF NOT EXISTS не добавляет колонки в существующие таблицы —
+    делаем это явно через ALTER TABLE для БД, созданных до того, как поле
+    bbox появилось в _SCHEMA.
+    """
+    cols = conn.execute("PRAGMA table_info(task_results)").fetchall()
+    col_names = {row["name"] for row in cols}
+    if "bbox" not in col_names:
+        conn.execute("ALTER TABLE task_results ADD COLUMN bbox TEXT")
+
+
 def init_db() -> None:
     """Create all tables (idempotent). Safe to call multiple times."""
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_bbox_column(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -233,17 +248,25 @@ def save_task_result(
     max_score: float,
     confidence: str,
     grading_notes: str | None = None,
+    bbox: str | None = None,
 ) -> None:
+    """Сохранить результат проверки одной задачи.
+
+    Args:
+        bbox: опционально, JSON-строка вида '{"x1":0.05,"y1":0.2,"x2":0.95,"y2":0.4}'
+              с нормализованными координатами от 0 до 1. None — bbox неизвестен,
+              Review Panel покажет страницу целиком (старое поведение).
+    """
     with get_connection() as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO task_results
                 (student_id, task_number, page_number, recognized_answer,
-                 score, max_score, confidence, grading_notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 score, max_score, confidence, grading_notes, bbox)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (student_id, task_number, page_number, recognized_answer,
-             score, max_score, confidence, grading_notes),
+             score, max_score, confidence, grading_notes, bbox),
         )
 
 
@@ -256,6 +279,10 @@ def get_task_results(student_id: int) -> list:
 
 
 def update_task_result(result_id: int, recognized_answer: str, score: float, manually_corrected: bool = True) -> None:
+    """Обновить распознанный ответ и балл (например, из Review Panel).
+
+    bbox не трогается — он остаётся таким, каким его установил grader.
+    """
     with get_connection() as conn:
         conn.execute(
             """
