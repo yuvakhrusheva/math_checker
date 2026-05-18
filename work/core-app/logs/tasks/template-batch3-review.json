@@ -1,0 +1,250 @@
+{
+  "validator": "task-validator",
+  "batch": 3,
+  "iteration": 1,
+  "status": "pass",
+  "tasks": {
+    "T11": {
+      "status": "pass",
+      "frontmatter": {
+        "status": "pass",
+        "fields_present": ["status", "depends_on", "wave", "skills", "verify", "reviewers", "teammate_name"],
+        "wave": 5,
+        "depends_on": [7, 8],
+        "verify": [],
+        "reviewers": ["code-reviewer", "test-reviewer"],
+        "skills": ["code-writing"],
+        "wave_correct": true,
+        "depends_on_correct": true,
+        "verify_correct": true,
+        "reviewers_correct": true
+      },
+      "sections": {
+        "description": true,
+        "what_to_do": true,
+        "tdd_anchor": true,
+        "acceptance_criteria": true,
+        "context_files": true,
+        "verification_steps": true,
+        "details": true,
+        "reviewers": true,
+        "post_completion": true
+      },
+      "tdd_anchor": {
+        "required": true,
+        "present": true,
+        "anchor_count": 10,
+        "anchors": [
+          "tests/unit/test_exporter.py::test_two_sheets_created",
+          "tests/unit/test_exporter.py::test_answers_sheet_columns",
+          "tests/unit/test_exporter.py::test_scores_sheet_columns",
+          "tests/unit/test_exporter.py::test_unreadable_students_excluded",
+          "tests/unit/test_exporter.py::test_error_students_have_ERROR_marker",
+          "tests/unit/test_exporter.py::test_pending_review_shows_PENDING",
+          "tests/unit/test_exporter.py::test_sort_order",
+          "tests/unit/test_exporter.py::test_grade3_performance_levels",
+          "tests/unit/test_exporter.py::test_grade2_performance_level_blank",
+          "tests/unit/test_exporter.py::test_filename_format"
+        ]
+      },
+      "ac_carry_forward": {
+        "status": "pass",
+        "user_spec_cas_covered": ["CA-20", "CA-21", "CA-22", "CA-23", "CA-24", "CA-25"],
+        "notes": "All 6 CAs from user-spec Excel export section (CA-20 through CA-25) are explicitly cited in AC items. The 'status=error → ERROR marker' AC item has no explicit CA citation — this is a tech-spec deviation (Deviation 1) rather than a user-spec CA, which is correct. CA-28 (English UI) is covered in the task Description body."
+      },
+      "findings": []
+    },
+    "T12": {
+      "status": "pass",
+      "frontmatter": {
+        "status": "pass",
+        "fields_present": ["status", "depends_on", "wave", "skills", "verify", "reviewers", "teammate_name"],
+        "wave": 6,
+        "depends_on": [9, 10, 11],
+        "verify": [],
+        "reviewers": [],
+        "skills": ["code-reviewing"],
+        "wave_correct": true,
+        "depends_on_correct": true,
+        "verify_correct": true,
+        "reviewers_correct": true
+      },
+      "sections": {
+        "description": true,
+        "what_to_do": true,
+        "tdd_anchor": false,
+        "tdd_anchor_note": "Absent — correct for audit task, no code written",
+        "acceptance_criteria": true,
+        "context_files": true,
+        "verification_steps": true,
+        "verification_steps_note": "Present with 'N/A — this is an audit task. No code written, no tests.' — correct",
+        "details": true,
+        "reviewers": false,
+        "reviewers_note": "No dedicated '## Reviewers' section body (unlike T14 which has an explicit 'No reviewers assigned.' line). Reviewers=[] in frontmatter covers the requirement; absence of the section body is minor.",
+        "post_completion": true
+      },
+      "tdd_anchor": {
+        "required": false,
+        "present": false,
+        "correct": true
+      },
+      "ac_carry_forward": {
+        "status": "pass",
+        "notes": "Audit task — no user-spec CA carry-forward required. ACs correctly describe audit outputs (report written, critical issues spawn fixer)."
+      },
+      "findings": [
+        {
+          "severity": "info",
+          "issue": "No dedicated '## Reviewers' section in the body. T14 has an explicit 'No reviewers assigned.' line under a Reviewers section; T12 and T13 do not. Frontmatter reviewers=[] is the authoritative field so this is not a compliance failure.",
+          "recommendation": "For consistency with T14, consider adding a brief '## Reviewers\\n\\nNo reviewers assigned.' section. No action required."
+        }
+      ]
+    },
+    "T13": {
+      "status": "pass",
+      "frontmatter": {
+        "status": "pass",
+        "fields_present": ["status", "depends_on", "wave", "skills", "verify", "reviewers", "teammate_name"],
+        "wave": 6,
+        "depends_on": [9, 10, 11],
+        "verify": [],
+        "reviewers": [],
+        "skills": ["security-auditor"],
+        "wave_correct": true,
+        "depends_on_correct": true,
+        "verify_correct": true,
+        "reviewers_correct": true
+      },
+      "sections": {
+        "description": true,
+        "what_to_do": true,
+        "tdd_anchor": false,
+        "tdd_anchor_note": "Absent — correct for audit task, no code written",
+        "acceptance_criteria": true,
+        "context_files": true,
+        "verification_steps": false,
+        "verification_steps_note": "No '## Verification Steps' section present. The task has no equivalent of T12's 'N/A' placeholder — the section is entirely absent.",
+        "details": true,
+        "reviewers": false,
+        "reviewers_note": "No dedicated '## Reviewers' section. Same as T12.",
+        "post_completion": true
+      },
+      "tdd_anchor": {
+        "required": false,
+        "present": false,
+        "correct": true
+      },
+      "ac_carry_forward": {
+        "status": "pass",
+        "notes": "Audit task — no user-spec CA carry-forward required. ACs correctly describe audit outputs (all security-relevant files reviewed, report written, gitleaks run)."
+      },
+      "findings": [
+        {
+          "severity": "warning",
+          "issue": "Missing '## Verification Steps' section. The template requires this section; T12 includes it with an N/A note. T13 omits the section entirely. This breaks template compliance for required sections.",
+          "recommendation": "Add a '## Verification Steps\\n\\nN/A — this is a security audit task. No code written; output is the audit report at work/core-app/logs/security-audit.md.' section."
+        },
+        {
+          "severity": "info",
+          "issue": "No dedicated '## Reviewers' section body. Same issue as T12. Frontmatter reviewers=[] is authoritative.",
+          "recommendation": "For consistency with T14, consider adding a brief '## Reviewers\\n\\nNo reviewers assigned.' section. No action required."
+        }
+      ]
+    },
+    "T14": {
+      "status": "pass",
+      "frontmatter": {
+        "status": "pass",
+        "fields_present": ["status", "depends_on", "wave", "skills", "verify", "reviewers", "teammate_name"],
+        "wave": 6,
+        "depends_on": [9, 10, 11],
+        "verify": [],
+        "reviewers": [],
+        "skills": ["test-master"],
+        "wave_correct": true,
+        "depends_on_correct": true,
+        "verify_correct": true,
+        "reviewers_correct": true
+      },
+      "sections": {
+        "description": true,
+        "what_to_do": true,
+        "tdd_anchor": false,
+        "tdd_anchor_note": "Absent — correct for audit task, no code written",
+        "acceptance_criteria": true,
+        "context_files": true,
+        "verification_steps": true,
+        "verification_steps_note": "Present with automated checks for report file existence and required sections",
+        "details": true,
+        "reviewers": true,
+        "reviewers_note": "Explicit 'No reviewers assigned.' line present",
+        "post_completion": true
+      },
+      "tdd_anchor": {
+        "required": false,
+        "present": false,
+        "correct": true
+      },
+      "ac_carry_forward": {
+        "status": "pass",
+        "notes": "Audit task — no user-spec CA carry-forward required. ACs correctly describe audit outputs (report written, critical gaps identified, fixture quality assessed)."
+      },
+      "findings": []
+    },
+    "T15": {
+      "status": "pass",
+      "frontmatter": {
+        "status": "pass",
+        "fields_present": ["status", "depends_on", "wave", "skills", "verify", "reviewers", "teammate_name"],
+        "wave": 7,
+        "depends_on": [12, 13, 14],
+        "verify": ["smoke", "user"],
+        "reviewers": [],
+        "skills": ["pre-deploy-qa"],
+        "wave_correct": true,
+        "depends_on_correct": true,
+        "verify_correct": true,
+        "reviewers_correct": true
+      },
+      "sections": {
+        "description": true,
+        "what_to_do": true,
+        "tdd_anchor": true,
+        "tdd_anchor_note": "Present as HTML comment: 'Non-code QA task — no new tests to write. All test execution is against existing test suite.' Correct pattern for QA tasks.",
+        "acceptance_criteria": true,
+        "context_files": true,
+        "verification_steps": true,
+        "verification_steps_automated": true,
+        "verification_steps_smoke": true,
+        "verification_steps_user": true,
+        "details": true,
+        "reviewers": true,
+        "reviewers_note": "'QA is its own verification — no reviewers assigned.' present",
+        "post_completion": true
+      },
+      "tdd_anchor": {
+        "required": false,
+        "present": true,
+        "style": "html-comment-placeholder",
+        "correct": true,
+        "notes": "Template says non-code tasks should delete or leave the section with a comment. T15 uses an HTML comment — acceptable pattern."
+      },
+      "ac_carry_forward": {
+        "status": "pass",
+        "user_spec_cas_covered": ["CA-1 through CA-28 (all)"],
+        "tech_spec_acs_covered": ["pytest unit pass", "pytest integration pass", "gitleaks clean", "SQLite schema matches spec", "streamlit run app.py starts"],
+        "notes": "T15 explicitly walks all 28 user-spec CAs and all 5 tech-spec technical ACs. Full coverage. 6 manual user verification steps match the user-spec verification table."
+      },
+      "findings": []
+    }
+  },
+  "batch_summary": {
+    "pass": ["T11", "T12", "T14", "T15"],
+    "pass_with_findings": ["T13"],
+    "fail": [],
+    "critical_issues": 0,
+    "warnings": 1,
+    "infos": 2
+  },
+  "summary": "Batch 3 (T11-T15) passes overall. T11 is fully compliant: correct wave/depends_on/verify/reviewers, TDD anchor with 10 specific test anchors, all CA-20 through CA-25 explicitly cited. T12 and T14 pass with minor inconsistency (T12 missing Reviewers body section, same as T13). T13 has one warning: the '## Verification Steps' section is entirely absent — unlike T12 which includes an N/A note; recommend adding a placeholder. T14 is the reference implementation for audit tasks in this batch (has N/A-equivalent Verification Steps and explicit Reviewers section). T15 is fully compliant: wave=7, depends_on=[12,13,14], verify=[smoke,user], reviewers=[], TDD Anchor as HTML comment, all 28 CAs and 5 tech-spec ACs covered. No task files were modified."
+}

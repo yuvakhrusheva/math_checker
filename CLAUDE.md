@@ -1,6 +1,6 @@
-# Project: [PROJECT NAME]
+# Project: math_checker
 
-> **[ONE SENTENCE - WHAT THIS PROJECT IS ABOUT]**
+> **Local tool for AI-powered grading of handwritten math monitoring tests for 2nd and 3rd grade students in Azerbaijan.**
 
 ---
 

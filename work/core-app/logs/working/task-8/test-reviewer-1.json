@@ -1,0 +1,14 @@
+{
+  "task": "Task 8: Criteria Management UI",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "ok",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/unit/test_criteria_loader.py",
+      "issue": "Task 8 has no new automated TDD anchors per spec — validation logic is covered by T3 tests. All 9 criteria_loader tests pass.",
+      "suggestion": "No change required."
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "validator": "test-reviewer",
+  "round": 2,
+  "status": "fail",
+  "round1_fixes_confirmed": [
+    "test_pdf_processor.py added to Testing Strategy with corrupted/single-page/valid cases",
+    "Integration test now asserts LLM was actually called and recognized_answer is populated from real scan",
+    "empty answer + confidence:low now explicitly verifies student.status becomes requires_review",
+    "test_grader.py now distinguishes malformed JSON (status=error) from all-empty LLM response (status=unreadable)",
+    "test_exporter.py now covers error students excluded and grade 2 performance level column blank"
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "location": "Testing Strategy — Integration tests (resumability test)",
+      "issue": "The resumability test still does not specify HOW the thread is interrupted. The text says 'interrupt (kill thread)' — but killing a live thread in Python is not straightforward and can leave SQLite in a partially-written state (mid-transaction). Round 1 flagged this; the round 2 update added 'no duplicate task_results rows, no extra LLM calls' assertions, but the interrupt mechanism remains undefined. Without a concrete mechanism, implementing agents will make different assumptions, some of which will produce flaky or non-reproducible tests.",
+      "recommendation": "Specify the interrupt mechanism explicitly. The safest approach for a test: after 3 of 5 students reach status=processed, programmatically set a stop flag on the ProcessingThread (e.g., thread.stop_flag.set()), let the thread exit cleanly, then restart it. Alternatively: pre-populate 3 students in SQLite as status=processed before the first run, so the thread only processes 2. Both are deterministic and do not rely on OS-level thread killing."
+    },
+    {
+      "severity": "warning",
+      "location": "Testing Strategy — missing: test_queue_processor.py",
+      "issue": "test_queue_processor.py is created in Task 7 (files to modify) but the Testing Strategy section still contains no description of what it tests. This was a round 1 finding (severity: info) — it has not been addressed. The scope remains undefined: does it use real Drive + LLM, or mocked sub-dependencies? Does it test status transitions, thread lifecycle, mid-cohort errors?",
+      "recommendation": "Add a test_queue_processor.py entry to the Testing Strategy section describing: (a) it uses mocked drive/pdf_processor/grader to test orchestration logic in isolation; (b) tests status transitions (pending → processing → done, done_with_errors); (c) tests that when one student raises an error, remaining students in the cohort still process; (d) tests start()/is_running() interface."
+    },
+    {
+      "severity": "warning",
+      "location": "Agent Verification Plan — AVP table vs. E2E=None decision",
+      "issue": "The AVP section now states 'No Streamlit UI automation — UI verified manually by user.' However, the user-spec 'Как проверить' table (steps 1 and 2) explicitly says 'Playwright / Streamlit test' as the tool for those steps. The tech-spec AVP does not reclassify or supersede those steps — it simply states a different policy without reconciling the contradiction. An implementing agent reading both documents will encounter conflicting instructions.",
+      "recommendation": "Add an explicit deviation note in the User-Spec Deviations section (or in the AVP) stating that verification steps 1 and 2 from the user-spec 'Как проверить' table are reclassified as manual user verification, not agent-executed tests. Remove 'Playwright' from the Tools Required list if it appears, or add a note that Playwright is not used."
+    },
+    {
+      "severity": "warning",
+      "location": "Testing Strategy — Unit tests (test_grader.py) — fixture files",
+      "issue": "Round 1 flagged that LLM fixture files are not enumerated in the Testing Strategy section — only sample_response.json is mentioned in Task 6. This remains unaddressed. The Testing Strategy describes test scenarios that require distinct fixtures (malformed JSON, all-empty recognized_answer, missing detected_variant, confidence:low, confidence:high with empty answer) but does not name those fixture files. The implementing agent for Task 6 may create only one fixture file.",
+      "recommendation": "Add to the Testing Strategy section (under test_grader.py) an explicit list of required fixture files: (a) valid_full_response.json, (b) malformed_non_json.txt, (c) all_empty_answers.json (all tasks have recognized_answer=''), (d) missing_variant.json (detected_variant=null), (e) confidence_low_one_task.json, (f) confidence_high_empty_answer.json. State that these live in tests/fixtures/llm_responses/."
+    },
+    {
+      "severity": "warning",
+      "location": "Testing Strategy — Integration tests — Drive download error path",
+      "issue": "Round 1 flagged that there is no integration test for CA-14 (Drive download failure logged separately from unreadable). The 5-PDF test folder has 1 unreadable PDF but no Drive-inaccessible file. This remains unaddressed — there is still no test that verifies student.status=error with an error_message indicating a Drive download failure (distinct from status=unreadable from LLM failure).",
+      "recommendation": "Add a Drive download error integration test case: either (a) include a 6th PDF in the test folder that the service account cannot access (file-level permission revoked), or (b) add a unit test in test_queue_processor.py that mocks drive.py to raise a download error and asserts student.status=error with error_message containing 'drive' or 'download' (not 'unreadable')."
+    },
+    {
+      "severity": "warning",
+      "location": "Testing Strategy — Unit tests (test_exporter.py) — PENDING column behavior",
+      "issue": "The round 2 update added 'unreadable and error students excluded' to test_exporter.py. However, the PENDING marker column-level behavior for requires_review students (round 1 warning) is still not explicitly covered. The spec says 'students with incomplete review marked PENDING' but does not test: (a) which specific columns show PENDING vs actual values, (b) that a student with requires_review + review_status=done shows actual values (not PENDING), (c) that a student with requires_review + review_status=pending shows PENDING in task columns only.",
+      "recommendation": "Add two test cases to test_exporter.py: (1) student with status=requires_review, review_status=pending → task answer/score columns are PENDING, total score is PENDING; (2) student with status=requires_review, review_status=done → actual values shown in all columns."
+    },
+    {
+      "severity": "warning",
+      "location": "Testing Strategy — missing: LLM token limit / batching logic",
+      "issue": "The Risks section documents a >10 pages → batch-of-5 mitigation, but there is still no unit test for this code path. This was a round 1 warning and remains unaddressed. The batching and response-merge logic in grader.py will be untested.",
+      "recommendation": "Add a unit test in test_grader.py: mock pdf_processor to return 12 pages, verify that LiteLLM is called twice (batches of 5+5+2 or 5+7, per the spec's grouping), and that the merged task_results have correct task attribution across batch boundaries."
+    }
+  ],
+  "summary": "Round 2 fixes all 5 critical gaps from round 1. Remaining issues: the resumability interrupt mechanism is still underspecified (critical — will cause flaky tests), test_queue_processor.py scope is still absent from the Testing Strategy (warning), the Playwright/AVP contradiction is unresolved (warning), LLM fixture files are still not enumerated (warning), the Drive download error integration test is still missing (warning), the PENDING column behavior sub-cases in test_exporter.py are still absent (warning), and the LLM batching unit test is still missing (warning). No new critical gaps were introduced by the round 2 changes."
+}

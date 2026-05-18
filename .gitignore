@@ -39,7 +39,7 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+/logs/
 
 # Test coverage
 coverage/
@@ -50,3 +50,7 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+
+# math_checker specific
+data/
+# criteria/ — tracked in git (answer keys managed by team)

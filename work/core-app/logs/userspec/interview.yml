@@ -1,0 +1,419 @@
+# Interview Plan for Feature Planning
+#
+# Tracks progress of adaptive discovery interview for a new feature/bug/refactoring.
+# Updated after EACH user response with scoring, values, and remaining gaps.
+#
+# Scoring: 0-100% (how well we understand this aspect)
+# Status: pending → partial → complete
+# Required: true = must reach threshold, false = cover if relevant
+
+# ============================================================================
+# Interview Metadata (Session Recovery)
+# ============================================================================
+interview_metadata:
+  started: "2026-04-13 12:00:00"
+  last_updated: "2026-04-13 12:00:00"
+  status: "completed"
+  can_resume: true
+  current_question_num: 1
+  feature_size: "L"
+
+# ============================================================================
+# Conversation History (for session recovery)
+# ============================================================================
+# Preserves complete Q&A. Update after EVERY user response.
+#
+conversation_history:
+  - question_num: 1
+    timestamp: "2026-04-13 12:05:00"
+    topic: "pdf_structure, student_identity, manual_correction, grade2_criteria"
+    agent_question: |
+      1. Один PDF = одна работа одного ребёнка, или один PDF = весь класс?
+      2. На листе есть имя/фамилия ребёнка?
+      3. Нужна ли возможность поправить оценку вручную?
+      4. Критерии для 2-го класса уже есть?
+    user_answer: |
+      1. Один PDF = один ребёнок.
+      2. Лист ребёнка подписан.
+      3. Да, нужна возможность корректировать. Также нужно разметить работы, в распознавании которых ИИ не уверен и требуется ручная проверка.
+      4. Есть все файлы и для 2, и для 3 класса, но пока только на русском языке.
+    summary: "1 PDF = 1 ученик. Имя есть на листе (AI должен извлечь). Нужна ручная корректировка + флаг неуверенных работ. Критерии 2кл есть, но только RU."
+  - question_num: 2
+    timestamp: "2026-04-13 12:15:00"
+    topic: "pages, student_name, uncertain_review, variant_detection"
+    agent_question: |
+      1. Сколько страниц в PDF одного ребёнка?
+      2. Имя написано от руки или напечатано?
+      3. Как работает ручная проверка помеченных работ?
+      4. Как определяется вариант теста?
+    user_answer: |
+      1. Пока не готова сказать, типографской версии ещё нет.
+      2. Имя написано ребёнком от руки.
+      3. Оператор отдельно получает список сомнительных работ.
+      4. Вариант напечатан на бланке.
+    summary: "Страниц неизвестно — нужна гибкость. Имя рукописное — ненадёжный OCR. Сомнительные работы = отдельный список. Вариант на бланке — AI может определить сам."
+  - question_num: 3
+    timestamp: "2026-04-13 12:25:00"
+    topic: "ui_flow, student_key, az_criteria, uncertainty_threshold"
+    agent_question: |
+      1. В каком виде список сомнительных работ?
+      2. Как используется имя в Excel?
+      3. Когда AZ критерии, нужна ли поддержка загрузки критериев через UI?
+      4. Что считается сомнительной работой?
+    user_answer: |
+      1. Поле в интерфейсе: оператор добавляет ссылку на папку + метаданные когорты (школа, класс, ФИО учителя, дата). Обработка в фоне, можно параллельно добавлять следующие когорты — очередь. После обработки — уведомление/новое окно со спорными случаями для ручного уточнения.
+      2. Имя — колонка для справки. Каждой работе нужен уникальный ключ.
+      3. AZ критерии через несколько дней. Интересна доп функция: загрузка тестов и критериев через UI до начала работы.
+      4. Пустое поле = 0. Неразборчивые тексты → выводить на проверку оператору.
+    summary: "Многошаговый UI: форма когорты → фоновая обработка → очередь → уведомление → панель спорных случаев. Уникальный ключ на студента. Загрузка критериев через UI — запрос. Пустое=0, неразборчивое=на проверку."
+  - question_num: 4
+    timestamp: "2026-04-13 12:35:00"
+    topic: "student_key, background_processing, review_panel, ui_language"
+    agent_question: |
+      1. Как формировать уникальный ключ студента?
+      2. Устроит ли sequential queue вместо параллельной обработки?
+      3. Что видит оператор в панели спорных случаев?
+      4. Язык интерфейса?
+    user_answer: |
+      1. Автоинкремент.
+      2. Да, устроит — прогресс-бар + форма следующей когорты рядом.
+      3. Скан страницы с выделенным полем непонимания. Оператор исправляет ответ, балл пересчитывается автоматически.
+      4. Английский.
+    summary: "Ключ = автоинкремент. Обработка последовательная с очередью. Панель проверки: скан + выделение + редактирование ответа + автопересчёт балла. UI на английском."
+  - question_num: 5
+    timestamp: "2026-04-13 12:45:00"
+    topic: "az_tests, quality_threshold, variant_error, resume"
+    agent_question: |
+      1. Что делать с AZ-тестами пока нет критериев?
+      2. Как оценивать качество AI-проверки?
+      3. Что делать если AI не распознал вариант теста?
+      4. Повторный запуск — с нуля или помнить сделанное?
+    user_answer: |
+      1. AZ-тесты не будут загружаться — критерии появятся одновременно с тестами.
+      2. После MVP — тестовый прогон на прошлогодних данных. Расхождение ≤3%. Отдельного интерфейса для сравнения не нужно.
+      3. Выводить на ручную проверку с возможностью указать вариант вручную.
+      4. Помнить что уже сделано, пропускать обработанное (resumable через SQLite).
+    summary: "AZ просто не появятся без критериев. Качество: ≤3% расхождение, проверяется вручную после MVP. Нераспознанный вариант → ручная проверка. Resumable processing подтверждён."
+  - question_num: 6
+    timestamp: "2026-04-13 12:55:00"
+    topic: "export, sessions, excel_naming"
+    agent_question: |
+      1. Когда доступна кнопка Export?
+      2. Что происходит при повторном экспорте?
+      3. Сессии — восстанавливаются или с нуля?
+    user_answer: |
+      1. Кнопка доступна всегда — экспортирует текущее состояние.
+      2. Новый файл с отметкой времени: results_2026-04-13_14-30.xlsx
+      3. Результаты сохраняются между запусками (SQLite персистентен).
+    summary: "Export всегда доступен. Файлы с timestamp. Полная персистентность через SQLite."
+  - question_num: 7
+    timestamp: "2026-04-13 13:05:00"
+    topic: "errors, metadata_edit, main_screen"
+    agent_question: |
+      1. Что делать при ошибке скачивания PDF?
+      2. Можно ли редактировать метаданные когорты после добавления?
+      3. Что видит оператор на главном экране?
+    user_answer: |
+      1. Логировать и выводить отдельным списком (не в review panel, отдельно от спорных случаев).
+      2. Можно редактировать в любой момент.
+      3. Список когорт со статусами (pending/processing/done/has_errors), прогресс текущей обработки, кнопки Export и Review.
+    summary: "Ошибки файлов = отдельный список от спорных случаев. Метаданные редактируемы всегда. Главный экран: список когорт + прогресс + Export + Review."
+  - question_num: 8
+    timestamp: "2026-04-13 13:15:00"
+    topic: "confidence_threshold, unreadable_pdf"
+    agent_question: |
+      1. Как ИИ сигнализирует о неуверенности?
+      2. Что делать с полностью нечитаемым PDF?
+    user_answer: |
+      1. ИИ возвращает confidence: low/high в JSON — если low, идёт на проверку.
+      2. В список ошибок с пометкой "unreadable file" (требуется повторное сканирование).
+         Студент НЕ попадает в когорту — будет обработан заново когда папка перезапустится.
+    summary: "confidence: low/high в LLM JSON. Нечитаемые PDF → error list со статусом unreadable, исключены из Excel до повторной успешной обработки."
+  - question_num: 9
+    timestamp: "2026-04-13 13:25:00"
+    topic: "export_pending, missing_criteria, unreadable_student, integration_tests"
+    agent_question: |
+      1. Экспорт при незакрытых pending случаях?
+      2. Что делать если нет файла критериев для когорты?
+      3. Студент с полностью нечитаемым PDF — в Excel?
+      4. Тесты Drive/LLM — мок или реальный сервис?
+    user_answer: |
+      1. Экспортировать можно в любой момент. Нерешённые студенты → пометка PENDING в Excel.
+      2. Добавление когорты блокируется сразу с ошибкой (до очереди).
+      3. Студент в списке ошибок (по имени файла), в Excel не появляется совсем.
+      4. Реальный тестовый Drive аккаунт + тестовая папка.
+    summary: "Export с PENDING строками. Когорта блокируется если нет критериев. Unreadable = только в error list, не в Excel. Интеграционные тесты на реальном Drive."
+# Format:
+# - question_num: 1
+#   timestamp: "2025-11-12 15:20:33"
+#   topic: "user_problem"
+#   agent_question: |
+#     [Full question text]
+#   user_answer: |
+#     [Full answer text]
+#   summary: "Brief summary"
+
+# ============================================================================
+# Phase 1: High-Level Feature Understanding
+# ============================================================================
+# Interview Cycle 1 scope
+phase1_feature_overview:
+
+  feature_name:
+    score: 95
+    status: "complete"
+    value: "core-app — complete math_checker application"
+    gaps: ""
+    required: true
+
+  feature_description:
+    score: 90
+    status: "complete"
+    value: "Streamlit app: load criteria JSONs, queue cohorts (GDrive folder + metadata), AI processes PDFs, review panel for uncertain cases, export to Excel"
+    gaps: ""
+    required: true
+
+  work_type:
+    score: 95
+    status: "complete"
+    value: "feature — new application from scratch"
+    gaps: ""
+    required: true
+
+  user_problem:
+    score: 90
+    status: "complete"
+    value: "Grading 1200 handwritten worksheets manually is slow and inconsistent. Need automated AI grading with human review for uncertain cases."
+    gaps: ""
+    required: true
+
+  target_users:
+    score: 90
+    status: "complete"
+    value: "Single operator (project coordinator)"
+    gaps: ""
+    required: false
+
+  success_criteria:
+    score: 75
+    status: "partial"
+    value: "AI grading ≤3% deviation from manual. All 1200 PDFs processed. Excel output ready for analyst."
+    gaps: "Need to clarify: what counts as 'processed' when review panel has unresolved items"
+    required: true
+
+  constraints:
+    score: 85
+    status: "complete"
+    value: "Local only. English UI. Pages per PDF unknown (flexible). AZ criteria not yet available. Student name via handwriting OCR (unreliable, informational only)."
+    gaps: ""
+    required: true
+
+  testing_strategy:
+    score: 70
+    status: "partial"
+    value: "Unit tests for grading logic + Excel export. Manual E2E on real scans after MVP. No automated E2E."
+    gaps: "Size L — should clarify integration test scope for Drive API and LLM calls"
+    required: true
+
+# ============================================================================
+# Phase 2: User Experience & Scenarios
+# ============================================================================
+# Interview Cycle 2 scope (together with Phase 3)
+phase2_user_experience:
+
+  user_stories:
+    score: 90
+    status: "complete"
+    value: "1) Load criteria JSONs via UI. 2) Add cohort (GDrive link + school/class/teacher/date). 3) Queue processes automatically. 4) Review uncertain cases (scans with highlights). 5) Export Excel anytime."
+    gaps: ""
+    required: true
+
+  acceptance_criteria:
+    score: 80
+    status: "partial"
+    value: "All PDFs processed. Uncertain cases flagged. Excel has 2 sheets. Student IDs auto-assigned. Export creates timestamped file."
+    gaps: "Need: criteria for what qualifies as uncertain (LLM confidence threshold)"
+    required: true
+
+  edge_cases:
+    score: 75
+    status: "partial"
+    value: "Empty answer=0. Unreadable text→review. Unrecognized variant→review with manual variant input. Drive download error→separate error log."
+    gaps: "What if all pages of a PDF are unreadable? What if criteria JSON is malformed?"
+    required: true
+
+  error_scenarios:
+    score: 85
+    status: "complete"
+    value: "Drive errors: logged separately. LLM parse fail: student marked error. Unrecognized variant: manual review. Metadata editable anytime."
+    gaps: ""
+    required: true
+
+  verification_strategy:
+    score: 85
+    status: "complete"
+    value: "Unit tests: grading logic, Excel structure. Manual E2E: run on last year's test data, verify ≤3% deviation from manual grades."
+    gaps: ""
+    required: true
+
+  ui_ux_requirements:
+    score: 85
+    status: "complete"
+    value: "English UI. Main screen: cohort list with statuses + progress bar + Export + Review buttons. Review panel: scan image with highlighted uncertain field + editable answer + auto-recalculated score."
+    gaps: ""
+    required: false
+
+  risks:
+    score: 80
+    status: "partial"
+    value: "Handwritten name OCR unreliable (informational only, mitigated by student_id). LLM may miss variant number. Pages per PDF unknown."
+    gaps: "Risk of LLM cost overrun if many retries needed"
+    required: true
+
+  technical_decisions:
+    score: 85
+    status: "complete"
+    value: "LiteLLM for model flexibility. Sequential queue (not parallel). Variant auto-detected from scan. Student key = autoincrement. Criteria loaded via UI into criteria/ folder."
+    gaps: ""
+    required: false
+
+  deploy_approach:
+    score: 90
+    status: "complete"
+    value: "Local only. streamlit run app.py. No CI/CD."
+    gaps: ""
+    required: false
+
+  manual_user_actions:
+    score: 90
+    status: "complete"
+    value: "Setup: pip install, fill .env with API keys, get Google service account JSON. Runtime: add cohorts, review uncertain cases, click Export."
+    gaps: ""
+    required: false
+
+# ============================================================================
+# Phase 3: Integration & Technical Context
+# ============================================================================
+# Interview Cycle 2 scope (together with Phase 2)
+phase3_integration:
+
+  integration_points:
+    score: 90
+    status: "complete"
+    value: "Google Drive API (folder traversal + PDF download). LiteLLM (vision LLM calls). SQLite (persistence). openpyxl (Excel export)."
+    gaps: ""
+    required: true
+
+  dependencies:
+    score: 90
+    status: "complete"
+    value: "streamlit, litellm, PyMuPDF, google-api-python-client, google-auth, pandas, openpyxl"
+    gaps: ""
+    required: false
+
+  technical_constraints:
+    score: 85
+    status: "complete"
+    value: "Local machine only. Pages per PDF unknown — must handle variable page count. LLM JSON parse can fail — must handle gracefully. Streamlit threading limitations."
+    gaps: ""
+    required: false
+
+  data_requirements:
+    score: 90
+    status: "complete"
+    value: "Input: PDFs from GDrive + criteria JSONs. Store: SQLite (sessions, folders, students, task_results). Output: timestamped Excel files."
+    gaps: ""
+    required: false
+
+  migration_needs:
+    score: 100
+    status: "complete"
+    value: "N/A — new project from scratch."
+    gaps: ""
+    required: false
+
+# ============================================================================
+# Phase 4: Completion
+# ============================================================================
+phase4_completion:
+  userspec_file: ""  # work/{feature}/user-spec.md
+  status: "pending"  # pending | created | approved
+
+# ============================================================================
+# Decision Rules
+# ============================================================================
+decision_rules:
+
+  required_threshold: 85
+  optional_threshold: 50
+
+  # Stop criteria (BOTH must be true to exit a cycle)
+  stop_criteria:
+    - "All required items in current cycle scope score >= 85%"
+    - "Structural: every required item has non-empty value, no TBD, gaps empty or conscious limitations"
+
+  priority_order:
+    - "Required items with score < 85% (lowest score first)"
+    - "Optional items mentioned by user in context"
+    - "Other optional items if user seems knowledgeable"
+
+  question_strategy:
+    - "3-4 questions per batch about different gaps"
+    - "Run as many batches as needed — batch size is NOT cycle limit"
+    - "Propose solutions based on PK, not just ask questions"
+    - "Challenge with substance: counterexamples, code references, unexplored scenarios"
+    - "After each response: update scores, values, gaps, conversation_history, save"
+
+# ============================================================================
+# Interview Progress
+# ============================================================================
+progress:
+  current_phase: "phase1_feature_overview"
+  questions_asked: 0
+  last_question: ""
+  total_required_score: 0
+  total_optional_score: 0
+  completion_estimate: "0%"
+  user_detail_level: "unknown"  # brief | moderate | detailed
+
+# ============================================================================
+# Notes
+# ============================================================================
+notes: |
+  Free-form notes:
+  - Important insights
+  - Areas of uncertainty
+  - Pivot points
+  - Scope changes
+
+# ============================================================================
+# USAGE INSTRUCTIONS
+# ============================================================================
+#
+# 1. INIT: Created by init-feature-folder.sh at work/{feature}/logs/userspec/interview.yml
+#    Set metadata.started, metadata.status: in_progress
+#
+# 2. INITIAL SCORING: After user's free-form description, score ALL items
+#    Detailed 80-95%, brief 50-70%, vague 20-40%, not mentioned 0%
+#
+# 3. INTERVIEW LOOP (save after EVERY response):
+#    a) Find required items with score < 85% in current cycle scope
+#    b) Ask 3-4 questions about different gaps
+#    c) Propose solutions based on PK
+#    d) User answers
+#    e) Update: conversation_history, scores, values, gaps, metadata
+#    f) Save immediately
+#    g) Check stop criteria (score >= 85% AND structural: value filled, no TBD, gaps resolved)
+#    h) Not done → repeat. Done → next cycle.
+#
+# 4. CYCLES:
+#    Cycle 1: phase1_feature_overview items
+#    Cycle 2: phase2_user_experience + phase3_integration items
+#    Cycle 3: ALL items still below threshold (cleanup pass)
+#
+# 5. RESUME: If metadata.status is "in_progress"
+#    Load, show conversation summary, resume from current state
+#
+# 6. COMPLETION: After user approves user-spec.md
+#    Set phase4_completion.status: approved
+#    Set metadata.status: completed

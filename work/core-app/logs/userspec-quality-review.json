@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "name": "frontmatter_complete",
+      "pass": true,
+      "finding": "Frontmatter contains all required fields: created (2026-04-13), status (draft), type (feature), size (L). All values are valid per the defined enums."
+    },
+    {
+      "name": "what_section_clear",
+      "pass": true,
+      "finding": "Section 'Что делаем' clearly describes: Streamlit app, target users (2-3 grade pupils in Azerbaijan), operator workflow, PDF scan processing via vision LLM, scoring against criteria, and Excel export. Scope is unambiguous."
+    },
+    {
+      "name": "why_section_concrete",
+      "pass": true,
+      "finding": "Section 'Зачем' gives a concrete quantified problem: ~1200 works, time-consuming manual grading, inconsistent results. Benefit is clearly stated (automation + QC for edge cases only)."
+    },
+    {
+      "name": "scenarios_step_by_step",
+      "pass": true,
+      "finding": "Five scenarios are written as numbered step-by-step flows: initial setup, cohort addition, processing, manual review, export. Each step specifies actor action and system response. Error paths are included (missing criteria, unreadable PDF, unrecognized variant)."
+    },
+    {
+      "name": "acceptance_criteria_testable",
+      "pass": true,
+      "finding": "27 acceptance criteria (CA-1 through CA-27) are present, grouped by feature area. Each criterion is specific and observable (e.g., CA-20: filename pattern, CA-22: column list with grade thresholds). All are independently verifiable."
+    },
+    {
+      "name": "no_placeholders",
+      "pass": false,
+      "finding": "Two confirmed placeholders remain: (1) CA-22 contains 'grade 2: TBD' for performance level thresholds — acknowledged in Constraints but still a gap in testability for grade 2 export. (2) The constraint 'AZ-критерии пока отсутствуют' means AZ-language cohort flow cannot be acceptance-tested at all. These are known deferred items but leave two criteria partially unverifiable."
+    },
+    {
+      "name": "risks_have_mitigations",
+      "pass": true,
+      "finding": "Four risks are listed, each with a bold mitigation: unreliable variant recognition → Review Panel fallback; high low-confidence rate → prompt tuning after MVP; LLM cost → LiteLLM model switching + resumable processing; unknown page count → page-agnostic iterator."
+    },
+    {
+      "name": "testing_strategy_defined",
+      "pass": true,
+      "finding": "Testing strategy is explicit: unit tests always done; integration tests use real Google Drive account + real PDF scans, no mocks; E2E replaced by manual run on last-year data with ≤3% deviation threshold. Scope and tooling (pytest, Playwright/Streamlit test) are specified."
+    },
+    {
+      "name": "verification_table_complete",
+      "pass": true,
+      "finding": "Verification table has 7 rows covering: criteria upload, cohort validation, processing integration, grader unit (low-confidence), grader unit (empty answer), Excel export, and resumable processing. Each row has tool and expected result. User-side manual checks are also listed."
+    },
+    {
+      "name": "size_matches_complexity",
+      "pass": true,
+      "finding": "Size is declared L (new architecture). This is appropriate: the spec covers a multi-component system with Google Drive integration, LLM pipeline, SQLite persistence, Streamlit UI with 4 distinct screens, and Excel export — clearly spanning new architecture with multiple subsystems."
+    }
+  ],
+  "overall": "fail",
+  "critical_findings": [
+    "grade 2 performance level thresholds are TBD (CA-22): the acceptance criterion for Scores sheet cannot be fully tested for grade 2 cohorts until thresholds are defined.",
+    "AZ-language criteria are explicitly absent: any acceptance criterion that involves AZ cohorts (CA-3, CA-4, CA-5) cannot be verified end-to-end at current state. Spec should note which CAs are blocked pending AZ criteria delivery."
+  ],
+  "minor_findings": [
+    "CA-7 ('metadata can be edited at any time') has no corresponding scenario step describing the edit flow — it is an acceptance criterion without a scenario walkthrough.",
+    "CA-17 ('visual highlight of the problematic field on the scan') implies image annotation capability but no technical note explains how the highlight is produced (bounding box from LLM? overlay in UI?). This may create implementation ambiguity.",
+    "The constraint 'interface in English' is mentioned only in Constraints, not reflected in any acceptance criterion — consider adding a CA or at minimum a note confirming all UI labels are English.",
+    "Scenario 3 step 1 says processing is sequential but does not specify what triggers processing start (automatic after cohort add, or manual button). A CA exists (CA-6: non-blocking UI) but the trigger mechanism is implicit."
+  ]
+}

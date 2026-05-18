@@ -1,0 +1,11 @@
+streamlit>=1.36
+litellm>=1.40
+PyMuPDF>=1.24
+google-api-python-client>=2.130
+google-auth>=2.29
+google-auth-httplib2>=0.2
+pandas>=2.2
+openpyxl>=3.1
+python-dotenv>=1.0
+pytest>=8.0
+pytest-mock>=3.12

@@ -1,0 +1,26 @@
+{
+  "task": "Task 4: Google Drive integration",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/integration/test_drive.py",
+      "issue": "All 5 TDD anchors present. Unit tests (URL parsing, sanitization) pass without credentials. Integration tests correctly skip when env vars are absent.",
+      "suggestion": "No change required."
+    },
+    {
+      "severity": "warning",
+      "location": "tests/integration/test_drive.py",
+      "issue": "No unit test for download_pdf() failure path (non-raising return with error dict). This is the key CA-14 behavior.",
+      "suggestion": "Add a unit test that mocks service.files().get_media() to raise HttpError and asserts download_pdf() returns (None, error_dict) without raising."
+    },
+    {
+      "severity": "info",
+      "location": "tests/integration/test_drive.py",
+      "issue": "No unit test for list_pdfs() with empty folder. Could be added as a unit test with a mock service.",
+      "suggestion": "Add optional unit test: mock service returns files=[], verify list_pdfs returns []."
+    }
+  ]
+}

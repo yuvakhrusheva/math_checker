@@ -1,0 +1,73 @@
+{
+  "validator": "task-validator-cross",
+  "status": "fail",
+  "findings": [
+    {
+      "type": "file_conflict",
+      "severity": "critical",
+      "tasks_involved": [9, 10, 11],
+      "issue": "app.py is listed as 'Files to modify' in T9, T10, and T11 — all three run in parallel in Wave 5. T9 registers pages/main.py in st.navigation; T10 registers pages/review_panel.py; T11 registers pages/export.py. Parallel writes to app.py will produce merge conflicts or one agent's changes overwriting another's.",
+      "recommendation": "Remove app.py from T10 and T11's 'Files to modify'. Consolidate all st.navigation page registrations into T9, which already owns app.py in Wave 5 and is the natural owner of the main routing wiring. T10 and T11 should only create their respective page files; T9 should import and register all Wave 5 pages (main, review_panel, export) into st.navigation. Alternatively, split registration into a dedicated Wave 6 task after all page files exist."
+    },
+    {
+      "type": "dependency_gap",
+      "severity": "warning",
+      "tasks_involved": [8],
+      "issue": "T8 depends_on=[3] only. Its context files list 'src/db.py — database access patterns' as a reference file, and app.py (which T8 modifies) imports init_db() from db.py. T2 (db.py full implementation) is not in T8's direct depends_on. While wave ordering guarantees T2 finishes before Wave 4 starts, the missing explicit dependency makes the task graph incomplete and could cause issues if waves are ever re-ordered or T8 is run standalone.",
+      "recommendation": "Add T2 to T8's depends_on: change depends_on=[3] to depends_on=[2, 3]. This reflects that T8 modifies app.py which imports from db.py, and that T8's context files explicitly reference src/db.py."
+    },
+    {
+      "type": "dependency_gap",
+      "severity": "warning",
+      "tasks_involved": [10],
+      "issue": "T10 depends_on=[7, 8]. T10 calls scorer.compute_score() (src/scorer.py from T6) and pdf_processor.pdf_to_images() (src/pdf_processor.py from T5). T7 depends_on=[2,4,5,6], so T10 gets T5 and T6 transitively via T7 — the transitive chain is complete. However, this transitivity is not explicit and T10's direct dependency list does not make it obvious that scorer.py and pdf_processor.py are satisfied.",
+      "recommendation": "Informational only — transitive chain is complete (T10→T7→[T5, T6]). No change required, but consider adding a comment in T10 noting that scorer.py (T6) and pdf_processor.py (T5) are satisfied transitively via T7."
+    },
+    {
+      "type": "dependency_gap",
+      "severity": "info",
+      "tasks_involved": [7],
+      "issue": "T7 depends_on=[2, 4, 5, 6]. T7 does not list T3 (criteria_loader.py) directly. T7 needs criteria JSON loaded for grading (via grader.py which uses criteria structures). T3 is satisfied transitively: T4→[2,3], T5→[2,3], T6→[2,3] — all three of T7's Wave 3 dependencies include T3. Transitive chain is complete.",
+      "recommendation": "No change required. T3 is covered transitively via T4, T5, and T6. The dependency chain is correct."
+    },
+    {
+      "type": "resource_conflict",
+      "severity": "info",
+      "tasks_involved": [1, 2, 8, 9, 11],
+      "issue": "SQLite connection is opened per-call (short-lived, WAL mode) with no connection pool. Multiple tasks (T8 app.py startup via init_db, T9 queue display polling, T11 export query) all call db functions independently. Tech-spec documents this pattern explicitly: 'N (short-lived per-call)'. No single owner conflict — design is intentional.",
+      "recommendation": "No change required. The per-call connection pattern with WAL mode is the correct design for this use case and is documented in the tech-spec shared resources table."
+    },
+    {
+      "type": "resource_conflict",
+      "severity": "info",
+      "tasks_involved": [6, 7],
+      "issue": "LiteLLM client is module-level stateless in grader.py (T6). Only grader.py creates and uses it; queue_processor.py (T7) calls grader.grade_student() as a consumer. Single owner is clear. No conflict.",
+      "recommendation": "No change required. Ownership is clean: T6 owns LiteLLM client, T7 consumes via grader.py API."
+    },
+    {
+      "type": "resource_conflict",
+      "severity": "info",
+      "tasks_involved": [4, 7],
+      "issue": "Google Drive service is created per cohort in drive.py (T4) and called by queue_processor.py (T7). Single owner is clear — drive.py creates the service, queue_processor.py calls the public API. No conflict.",
+      "recommendation": "No change required. Ownership follows the documented pattern in the tech-spec shared resources table."
+    }
+  ],
+  "app_py_owners": ["T1 (Wave 1)", "T8 (Wave 4)", "T9 (Wave 5)", "T10 (Wave 5)", "T11 (Wave 5)"],
+  "dependency_chain_verification": {
+    "T7_depends_on_2_4_5_6": "CORRECT — T2 (db.py) direct; T4 (drive.py) direct; T5 (pdf_processor.py) direct; T6 (grader.py + scorer.py) direct. T3 (criteria_loader.py) covered transitively via T4, T5, T6 all having depends_on=[2,3].",
+    "T8_depends_on_3": "INCOMPLETE — T2 (db.py) missing from explicit depends_on. App.py calls init_db(); T8 modifies app.py. Wave ordering guarantees T2 is done before Wave 4, but explicit dependency is missing.",
+    "T9_depends_on_7_8": "CORRECT — T7 (queue_processor) direct; T8 (criteria_management page + app.py nav) direct. db.py via T7→T2 ✓. queue_processor.py via T7 ✓. criteria_loader.py via T8→T3 ✓.",
+    "T10_depends_on_7_8": "CORRECT (transitively) — scorer.py via T7→T6 ✓; pdf_processor.py via T7→T5 ✓; db.py via T7→T2 ✓.",
+    "T11_depends_on_7_8": "CORRECT — db.py via T7→T2 ✓. exporter.py is new in T11, no prior dependency needed."
+  },
+  "wave_conflict_summary": {
+    "wave_1": "No conflicts — T1 solo.",
+    "wave_2": "No conflicts — T2 (db.py) and T3 (criteria_loader.py) modify distinct files.",
+    "wave_3": "No conflicts — T4 (drive.py), T5 (pdf_processor.py), T6 (grader.py + scorer.py) modify distinct files.",
+    "wave_4": "No conflicts — T7 (queue_processor.py) and T8 (criteria_management.py + app.py) modify distinct files. T8 is the sole app.py owner in this wave.",
+    "wave_5": "CRITICAL CONFLICT — T9, T10, T11 all modify app.py in parallel.",
+    "wave_6": "No conflicts — T12, T13, T14 are audit-only tasks with no file modifications.",
+    "wave_7": "No conflicts — T15 is QA-only with no file modifications."
+  },
+  "summary": "One critical conflict: app.py modified by T9, T10, and T11 in parallel Wave 5 — consolidate all st.navigation registrations into T9; one warning: T8 missing explicit depends_on T2 (db.py) despite modifying app.py which imports init_db()."
+}

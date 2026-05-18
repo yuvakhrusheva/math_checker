@@ -1,0 +1,32 @@
+{
+  "task": "Task 7: Queue processor with background threading",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "src/queue_processor.py:_process_cohort",
+      "issue": "If `list_students_by_cohort` returns an empty list (cohort with no PDFs yet), the cohort is immediately marked 'done' without error. This is actually correct behavior but could be confusing — consider logging a warning.",
+      "suggestion": "Add a comment or log entry noting that cohorts with no students are marked done immediately."
+    },
+    {
+      "severity": "warning",
+      "location": "src/queue_processor.py:run",
+      "issue": "Cohort-level exceptions are caught and silenced with only a status update. The actual exception is lost — no logging. This makes diagnosing cohort-level failures hard.",
+      "suggestion": "Add logging: `logging.exception('Cohort %s failed', cohort[\"id\"])` before updating status."
+    },
+    {
+      "severity": "info",
+      "location": "src/queue_processor.py:_determine_student_status",
+      "issue": "Logic is clean and matches the spec exactly: null variant → requires_review, all empty+high → unreadable, any low confidence → requires_review, otherwise processed.",
+      "suggestion": "No change required."
+    },
+    {
+      "severity": "info",
+      "location": "src/queue_processor.py",
+      "issue": "daemon=True set via super().__init__(daemon=True) as specified. _lock used for thread-safe singleton access.",
+      "suggestion": "No change required."
+    }
+  ]
+}

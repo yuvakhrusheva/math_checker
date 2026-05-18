@@ -1,0 +1,26 @@
+{
+  "task": "Task 4: Google Drive integration",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "src/drive.py:117-122",
+      "issue": "download_pdf signature accepts download_root as str|Path, but the default is a relative string 'data/downloads'. If CWD changes at runtime (e.g. Streamlit changes working directory), downloads go to wrong location.",
+      "suggestion": "Derive download_root as an absolute path from __file__ or accept it always as an absolute Path from the caller (queue_processor)."
+    },
+    {
+      "severity": "warning",
+      "location": "src/drive.py:156-169",
+      "issue": "_call_with_backoff wraps downloader.next_chunk in a lambda and retries it on rate limit, but MediaIoBaseDownload.next_chunk is stateful — retrying a chunk after partial download may corrupt the buffer.",
+      "suggestion": "Apply backoff only to service.files().list() and service.files().get_media() calls, not to downloader.next_chunk(). For chunk download errors, restart the download from scratch."
+    },
+    {
+      "severity": "info",
+      "location": "src/drive.py:71",
+      "issue": "cache_discovery=False disables caching of the API discovery document. This adds latency on every get_service() call. Acceptable for a local tool but worth noting.",
+      "suggestion": "No change required. Avoids stale cached discovery docs."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "task": "Task 6: LLM grader and scoring engine",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/unit/test_scorer.py tests/unit/test_grader.py",
+      "issue": "All 9 TDD anchors present and passing. litellm.completion is mocked — no real LLM calls. Fixture sample_response.json has 16 realistic tasks.",
+      "suggestion": "No changes required."
+    },
+    {
+      "severity": "warning",
+      "location": "tests/unit/test_scorer.py::TestPartialCredit::test_partial_credit",
+      "issue": "test_partial_credit tests that a wrong answer returns 0, not that a partial tier returns a partial score. The test name is misleading — it's actually testing zero credit for an incorrect answer with a partial tier present.",
+      "suggestion": "Either rename to test_zero_credit_with_partial_tier or add a genuine partial-credit test if partial scoring will be used in practice."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_grader.py",
+      "issue": "test_grade_student_passes_all_images uses a somewhat fragile argument parsing for mock call_args. Consider using mock_llm.call_args.kwargs directly.",
+      "suggestion": "Minor style improvement, not a correctness issue."
+    }
+  ]
+}

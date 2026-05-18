@@ -1,0 +1,232 @@
+{
+  "validator": "task-validator",
+  "batch": 2,
+  "iteration": 1,
+  "validated_at": "2026-04-20",
+  "tasks": [
+    {
+      "task": 6,
+      "title": "LLM grader and scoring engine",
+      "overall": "pass",
+      "checks": {
+        "frontmatter_complete": {
+          "pass": true,
+          "finding": "All required frontmatter fields present: status=planned, depends_on=[2,3], wave=3, skills=[code-writing], verify=[smoke], reviewers=[code-reviewer, security-auditor, test-reviewer], teammate_name (blank, acceptable)."
+        },
+        "sections_present": {
+          "pass": true,
+          "finding": "All required sections present: Description, What to do, TDD Anchor, Acceptance Criteria, Context Files, Verification Steps (Automated + Smoke), Details, Reviewers, Post-completion."
+        },
+        "wave_and_depends_on": {
+          "pass": true,
+          "finding": "wave=3, depends_on=[2,3] — matches specification exactly."
+        },
+        "verify_field": {
+          "pass": true,
+          "finding": "verify=[smoke] — correct. Smoke check present: `python -c \"from src.grader import build_prompt; ...\"` → Prompt OK."
+        },
+        "reviewers": {
+          "pass": true,
+          "finding": "reviewers=[code-reviewer, security-auditor, test-reviewer] — matches expected set for T6."
+        },
+        "tdd_anchors": {
+          "pass": true,
+          "finding": "TDD Anchor section present with 9 named test anchors across test_scorer.py and test_grader.py, plus fixture file. All anchors include write-first-fail-then-pass instruction. Covers all answer types (numeric, ordered_list, text), all tier types (full, partial, zero), edge cases (empty answer + high/low confidence), JSON parsing (valid, malformed, null variant), and prompt structure."
+        },
+        "ac_carry_forward": {
+          "pass": true,
+          "finding": "ACs cover tech-spec obligations for T6: CA-9/CA-10 covered via `test_parse_valid_response` (task_results with all fields) and `test_null_variant_flagged` (detected_variant=null signal). CA-11/CA-12 covered via scorer tests (empty+high→0 without review flag; confidence:low status signal returned to caller for T7 to act on). AC explicitly states `detected_variant=null → status signal returned to caller` and `json.JSONDecodeError propagated to caller` — correct split of responsibilities between T6 (signal production) and T7 (DB status write)."
+        }
+      },
+      "findings": []
+    },
+    {
+      "task": 7,
+      "title": "Queue processor with background threading",
+      "overall": "pass",
+      "checks": {
+        "frontmatter_complete": {
+          "pass": true,
+          "finding": "All required frontmatter fields present: status=planned, depends_on=[4,5,6], wave=4, skills=[code-writing], verify=[], reviewers=[code-reviewer, security-auditor, test-reviewer], teammate_name (blank, acceptable)."
+        },
+        "sections_present": {
+          "pass": true,
+          "finding": "All required sections present: Description, What to do, TDD Anchor, Acceptance Criteria, Context Files, Verification Steps (Automated only — correct, no smoke/user for this task), Details, Reviewers, Post-completion."
+        },
+        "wave_and_depends_on": {
+          "pass": true,
+          "finding": "wave=4, depends_on=[4,5,6] — matches specification exactly."
+        },
+        "verify_field": {
+          "pass": true,
+          "finding": "verify=[] — correct. No smoke or user verification steps required for this internal orchestration module; integration tests cover it."
+        },
+        "reviewers": {
+          "pass": true,
+          "finding": "reviewers=[code-reviewer, security-auditor, test-reviewer] — matches expected set for T7."
+        },
+        "tdd_anchors": {
+          "pass": true,
+          "finding": "TDD Anchor section present with 5 named integration test anchors: full_pipeline_5_students, resumability, request_stop_halts_processing, download_error_sets_error_status, error_message_sanitized. All anchors are integration tests (correct — queue processor requires real DB). Covers all failure modes: download error, stop flag, resumability, sanitization."
+        },
+        "ac_carry_forward": {
+          "pass": true,
+          "finding": "ACs cover all tech-spec obligations: CA-8 (resumability — already-processed students skipped) ✓; CA-11 (confidence:low → requires_review status written to DB in pipeline step 5) ✓; CA-13 (UnreadablePDF → status=unreadable) ✓; CA-14 (download failures set status=error with error_message, separate from grading errors) ✓. CA-6b partially covered (is_running() exposed for UI button state). Thread daemon=True ensures CA-26 (clean app exit) ✓."
+        }
+      },
+      "findings": []
+    },
+    {
+      "task": 8,
+      "title": "Criteria Management UI screen",
+      "overall": "pass",
+      "checks": {
+        "frontmatter_complete": {
+          "pass": true,
+          "finding": "All required frontmatter fields present: status=planned, depends_on=[3], wave=4, skills=[code-writing], verify=[user], reviewers=[code-reviewer, security-auditor, test-reviewer], teammate_name (blank, acceptable)."
+        },
+        "sections_present": {
+          "pass": true,
+          "finding": "All required sections present: Description, What to do, TDD Anchor (present with explicit rationale for no new automated anchors), Acceptance Criteria, Context Files, Verification Steps (Automated + User), Details, Reviewers, Post-completion."
+        },
+        "wave_and_depends_on": {
+          "pass": true,
+          "finding": "wave=4, depends_on=[3] — matches specification exactly. Correctly depends only on criteria_loader (Task 3), not on full pipeline."
+        },
+        "verify_field": {
+          "pass": true,
+          "finding": "verify=[user] — correct. User step present: open localhost:8501, navigate to Criteria Management, upload valid JSON → grid update; upload invalid → error shown."
+        },
+        "reviewers": {
+          "pass": true,
+          "finding": "reviewers=[code-reviewer, security-auditor, test-reviewer] — matches expected set for T8. Note: tech-spec task list only listed [code-reviewer, test-reviewer] for Task 8, but the task file correctly includes security-auditor per the default code-writing reviewer policy."
+        },
+        "tdd_anchors": {
+          "pass": true,
+          "finding": "TDD Anchor section present. Correctly explains that UI logic is thin and delegates to criteria_loader; validation is covered by test_criteria_loader.py (Task 3). Manual verification via Verify-user. This is an acceptable TDD anchor treatment for a UI passthrough task with no novel logic."
+        },
+        "ac_carry_forward": {
+          "pass": true,
+          "finding": "ACs map directly to user-spec: CA-1 (file uploader + save_criteria_file called) ✓; CA-2 (invalid JSON → st.error, file not saved) ✓; CA-3 (combinations grid visible) ✓; CA-28 (English UI explicitly stated) ✓. All 4 relevant user-spec CAs covered."
+        }
+      },
+      "findings": []
+    },
+    {
+      "task": 9,
+      "title": "Main screen UI (cohort queue)",
+      "overall": "fail",
+      "checks": {
+        "frontmatter_complete": {
+          "pass": true,
+          "finding": "All required frontmatter fields present: status=planned, depends_on=[7,8], wave=5, skills=[code-writing], verify=[user], reviewers=[code-reviewer, test-reviewer], teammate_name (blank, acceptable)."
+        },
+        "sections_present": {
+          "pass": false,
+          "finding": "MISSING: TDD Anchor section entirely absent. Task has skills=[code-writing] and implements non-trivial logic (criteria validation on form submit, GDrive URL validation, queue_processor.is_running() gating, fragment polling). TDD Anchor section is required for code-writing tasks per template. Also missing: Automated subsection in Verification Steps — only a User subsection is present. For a code-writing task, at minimum an Automated section (or explicit note that no automated tests are needed) should be present."
+        },
+        "wave_and_depends_on": {
+          "pass": true,
+          "finding": "wave=5, depends_on=[7,8] — matches specification exactly."
+        },
+        "verify_field": {
+          "pass": true,
+          "finding": "verify=[user] — correct. User step present: add cohort → list as Pending; Start Processing → live updates; concurrent add; edit blocked during processing."
+        },
+        "reviewers": {
+          "pass": true,
+          "finding": "reviewers=[code-reviewer, test-reviewer] — matches expected set for T9 (no security-auditor)."
+        },
+        "tdd_anchors": {
+          "pass": false,
+          "finding": "TDD Anchor section is entirely absent. Task 9 implements: GDrive URL validation logic, criteria_exists check before cohort add, is_running() button disabling, st.fragment polling — these are testable behaviors that warrant TDD anchors. Minimum expected anchors: test_add_cohort_validates_gdrive_url, test_add_cohort_checks_criteria_exists, test_start_processing_button_disabled_when_running."
+        },
+        "ac_carry_forward": {
+          "pass": true,
+          "finding": "ACs cover all relevant user-spec CAs: CA-4 (form fields present) ✓; CA-5 (criteria check on submit) ✓; CA-6 (non-blocking add) ✓; CA-6b (Start Processing disabled when running) ✓; CA-7 (Edit/Delete only for pending) ✓; CA-28 (English UI) ✓. CA-8 (resumability) indirectly covered via progress display. All 6 relevant CAs accounted for."
+        }
+      },
+      "findings": [
+        {
+          "severity": "fail",
+          "location": "Task 9 — TDD Anchor section",
+          "issue": "TDD Anchor section is entirely absent. Task 9 has skill=code-writing and contains testable non-UI logic: GDrive URL format validation, criteria_exists() check blocking form submission, is_running() state gating the Start Processing button. These behaviors should have write-first-fail-then-pass test anchors.",
+          "recommendation": "Add TDD Anchor section with at minimum: test_add_cohort_rejects_invalid_gdrive_url — non-Drive URL → st.error shown, db.create_cohort not called; test_add_cohort_blocked_without_criteria — criteria_loader.criteria_exists returns False → st.error shown; test_start_button_disabled_when_running — mock queue_processor.is_running()=True → button rendered disabled."
+        },
+        {
+          "severity": "warning",
+          "location": "Task 9 — Verification Steps",
+          "issue": "Automated subsection is absent from Verification Steps. Only a User subsection is present. For a code-writing task, the template expects an Automated section (pytest commands) or an explicit acknowledgment that no automated tests exist.",
+          "recommendation": "Add an Automated subsection, even if it only references existing tests that exercise the page logic indirectly, or add a note explaining why automated tests are not added for this task."
+        }
+      ]
+    },
+    {
+      "task": 10,
+      "title": "Review Panel UI",
+      "overall": "fail",
+      "checks": {
+        "frontmatter_complete": {
+          "pass": true,
+          "finding": "All required frontmatter fields present: status=planned, depends_on=[7,8], wave=5, skills=[code-writing], verify=[user], reviewers=[code-reviewer, security-auditor, test-reviewer], teammate_name (blank, acceptable)."
+        },
+        "sections_present": {
+          "pass": false,
+          "finding": "MISSING: TDD Anchor section entirely absent. Task has skills=[code-writing] and implements security-sensitive logic (path traversal guard via os.path.realpath). Also missing: Automated subsection in Verification Steps — only a User subsection is present. Additionally, app.py is not listed in Files to modify despite Tasks 8 and 9 both registering their pages in app.py via st.navigation; the Review Panel page also needs registration."
+        },
+        "wave_and_depends_on": {
+          "pass": true,
+          "finding": "wave=5, depends_on=[7,8] — matches specification exactly."
+        },
+        "verify_field": {
+          "pass": true,
+          "finding": "verify=[user] — correct. User step present: open Review Panel → student with confidence:low tasks → scan shown with task number → edit answer → score updates → mark as done."
+        },
+        "reviewers": {
+          "pass": true,
+          "finding": "reviewers=[code-reviewer, security-auditor, test-reviewer] — matches expected set for T10."
+        },
+        "tdd_anchors": {
+          "pass": false,
+          "finding": "TDD Anchor section is entirely absent. Task 10 includes a path traversal guard (os.path.realpath validation against data/downloads/) which is a security-critical behavior that requires a dedicated test. Additional testable logic: score recalculation on answer edit, manually_corrected=1 flag written on DB save, variant selectbox gating task display. These warrant write-first-fail-then-pass anchors."
+        },
+        "ac_carry_forward": {
+          "pass": true,
+          "finding": "ACs cover all relevant user-spec CAs: CA-16 (requires_review students listed, grouped by cohort) ✓; CA-17 (full PDF page image, task number shown, no bounding box) ✓; CA-18 (edit triggers recalculation via scorer.py, saved with manually_corrected=1) ✓; CA-19 (variant dropdown for detected_variant=null) ✓; CA-28 (English UI) ✓. All 5 relevant CAs covered."
+        }
+      },
+      "findings": [
+        {
+          "severity": "fail",
+          "location": "Task 10 — TDD Anchor section",
+          "issue": "TDD Anchor section is entirely absent. Task 10 has skill=code-writing and contains both security-critical logic (path traversal guard) and business logic (score recalculation, manually_corrected flag, variant gating). These require write-first-fail-then-pass test anchors.",
+          "recommendation": "Add TDD Anchor section with at minimum: test_path_traversal_rejected — pdf_path resolving outside data/downloads/ → rejected before opening; test_answer_edit_saves_manually_corrected — answer changed → task_result saved with manually_corrected=1; test_variant_null_blocks_task_display — detected_variant=None → task results not shown until variant selected."
+        },
+        {
+          "severity": "warning",
+          "location": "Task 10 — Files to modify / app.py registration",
+          "issue": "app.py is not listed in Files to modify and the Acceptance Criteria do not include registering the review_panel page in app.py st.navigation. Tasks 8 and 9 both explicitly require registering their pages in app.py. The Review Panel page also needs to appear in the sidebar navigation for operators to access it.",
+          "recommendation": "Add app.py to Files to modify. Add an AC: Page registered in app.py st.navigation (matching the pattern in Tasks 8 and 9)."
+        },
+        {
+          "severity": "warning",
+          "location": "Task 10 — Verification Steps",
+          "issue": "Automated subsection is absent from Verification Steps. Only a User subsection is present. The path traversal guard in particular should have an automated test.",
+          "recommendation": "Add an Automated subsection referencing the test file to be created (e.g., pytest tests/unit/test_review_panel.py -v)."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass_count": 3,
+    "fail_count": 2,
+    "failed_tasks": [9, 10],
+    "overall": "fail",
+    "key_issues": [
+      "Tasks 9 and 10 are both missing the TDD Anchor section, which is required for code-writing tasks per the template. Both tasks contain non-trivial testable logic (validation, security guards, state gating).",
+      "Task 10 is also missing app.py registration in its AC and Files list, breaking the navigation pattern established by Tasks 8 and 9.",
+      "Tasks 9 and 10 both omit the Automated subsection from Verification Steps.",
+      "Tasks 6, 7, and 8 are fully compliant — wave/depends_on, verify, reviewers, TDD anchors, and AC carry-forward all correct."
+    ]
+  }
+}

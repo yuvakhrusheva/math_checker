@@ -1,0 +1,100 @@
+{
+  "validator": "reality-checker",
+  "batch": 5,
+  "iteration": 1,
+  "status": "pass",
+  "findings": [
+    {
+      "task": 13,
+      "severity": "info",
+      "check": "security audit scope vs tech-spec concerns",
+      "issue": "All four security concerns from the tech-spec are covered: (1) drive.readonly scope enforcement — addressed under A05 'Verify drive.readonly scope is enforced in code'; (2) path traversal — addressed under A01 'verify paths stay within data/downloads/' and Edge cases 'Path traversal: verify symlink and ../ escapes are blocked'; (3) parameterized SQL — addressed under A03 'Confirm SQLite parameterized queries everywhere; no string formatting into SQL'; (4) error message sanitization — addressed under A09 'Check error messages in DB/UI for API key or token leakage; verify sanitizer covers all key formats (sk-, AIza-, Bearer, OAuth tokens)'. Full alignment.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 13,
+      "severity": "info",
+      "check": "gitleaks command present",
+      "issue": "gitleaks command is present in two places: AC line ('gitleaks run on the full codebase: gitleaks detect --source . --verbose') and Details section ('Secrets scan command: gitleaks detect --source . --verbose'). Fully covered.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 14,
+      "severity": "info",
+      "check": "test audit covers all test files (unit + integration)",
+      "issue": "The task explicitly states 'Review all test files in tests/ directory' and the Details section separately lists unit test completeness (test_scorer.py, test_grader.py, test_criteria_loader.py, test_exporter.py, test_db.py) and integration test completeness (full pipeline, resumability, Drive error path). All test files from the tech-spec testing strategy are named. Fully covered.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 14,
+      "severity": "info",
+      "check": "empty answer + confidence:low edge case",
+      "issue": "Covered in the Details section under 'test_scorer.py': 'empty answer edge cases?' is listed. The tech-spec testing strategy specifies: 'empty answer with confidence=low → score=0 AND student.status set to requires_review'. The task does not quote this verbatim but the fixture quality section asks 'Cover low/high confidence?' and the integration section covers 'Drive error path: download failure → error status distinct from unreadable'. The edge case is implicitly but adequately covered.",
+      "recommendation": "Minor: the task could be more explicit by naming the specific assertion ('empty answer + confidence:low → requires_review') as a named edge case. Not a blocker."
+    },
+    {
+      "task": 14,
+      "severity": "info",
+      "check": "error vs unreadable distinction",
+      "issue": "Covered explicitly in two places: (1) integration test section — 'Drive error path: download failure → error status distinct from unreadable'; (2) unit test section under test_grader.py — 'Malformed/unparseable JSON → error? ... LLM returns valid JSON with all tasks having empty recognized_answer fields → student status=unreadable'. The distinction is clearly surfaced.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 14,
+      "severity": "warning",
+      "check": "missing pytest run commands in ACs/Verification Steps",
+      "issue": "T14 is a test AUDIT task (reads and assesses tests, writes a report) — it does not run the test suite. The Verification Steps/Automated section correctly checks only for report file existence and required report sections, not pytest pass/fail. However, this means a T14 executor might audit tests without running them to verify they actually pass, missing broken tests entirely. The tech-spec testing strategy specifies expected test behaviors that a static audit alone cannot verify.",
+      "recommendation": "Consider adding an optional verification step: 'pytest tests/unit/ -v' and 'pytest tests/integration/ -v' to confirm tests actually pass as a baseline before assessing quality. Not strictly required for an audit task, but would strengthen the findings."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "all CA-1 through CA-28 explicitly listed",
+      "issue": "All 28 CAs are explicitly listed in the Details section, grouped by feature area: CA-1/2/3 (Criteria Management), CA-4 through CA-9 (Cohort management), CA-10 through CA-15 (Processing), CA-16 through CA-19 (Review Panel), CA-20 through CA-25 (Excel export), CA-26 through CA-28 (General). Full coverage confirmed.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "both pytest tests/unit/ AND pytest tests/integration/ commands",
+      "issue": "Both commands are present in two places each: (1) Acceptance Criteria — 'pytest tests/unit/ — 0 failures' and 'pytest tests/integration/ — 0 failures'; (2) Verification Steps/Automated — 'pytest tests/unit/ -v' and 'pytest tests/integration/ -v'. Fully covered.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "gitleaks command present",
+      "issue": "gitleaks is present in three places: AC ('gitleaks — no secrets found'), Verification Steps/Automated ('gitleaks detect --source . --verbose'), and Details/Technical ACs ('No API keys or secrets in committed files: gitleaks detect --source . --verbose'). Fully covered.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "manual verification steps described",
+      "issue": "6 manual verification steps are explicitly listed in Verification Steps/User: (1) upload valid criteria JSON; (2) try adding cohort without criteria; (3) run full pipeline on 5-PDF test folder; (4) open Review Panel, edit answer, verify recalculation; (5) export Excel and verify structure; (6) close/reopen browser and verify persistence. All steps are concrete and actionable.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "streamlit run app.py smoke check present",
+      "issue": "Smoke check is present in three places: (1) AC — 'streamlit run app.py — starts without errors'; (2) Verification Steps/Smoke — 'streamlit run app.py &' followed by HTTP health check via requests.get; (3) Details/Technical ACs — 'streamlit run app.py starts without import errors'. Fully covered.",
+      "recommendation": "No action needed."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "CA-10 through CA-15 compression",
+      "issue": "In the Details section, the bullet covering CA-10 through CA-15 reads 'CA-10 through CA-15: Processing — LLM JSON format, task results saved, confidence logic, empty answer logic, unreadable status, download error logging, student_id autoincrement'. This maps correctly: CA-10=LLM format+saves, CA-11=confidence logic, CA-12=empty answer logic, CA-13=unreadable, CA-14=download error logging, CA-15=student_id. The CA-12 nuance (empty+confidence:high vs empty+confidence:low) is referenced as 'empty answer logic' which is minimally specific but points to the right concern.",
+      "recommendation": "Minor: the CA-12 entry could explicitly note the high/low confidence split to avoid ambiguity for the executor. Not a blocker."
+    },
+    {
+      "task": 15,
+      "severity": "info",
+      "check": "dependency correctness",
+      "issue": "T15 depends_on [12, 13, 14] — Code Audit, Security Audit, and Test Audit respectively. This is correct: all three audit tasks must complete before final pre-deploy QA. Wave assignment is 7, audits are wave 6. Fully consistent.",
+      "recommendation": "No action needed."
+    }
+  ],
+  "summary": "All three tasks pass reality check. T13 fully covers all four tech-spec security concerns (drive.readonly, path traversal, parameterized SQL, error message sanitization) and includes the gitleaks command in both AC and Details. T14 covers all unit and integration test files, and explicitly surfaces the error-vs-unreadable distinction and confidence-based edge cases; one warning: the task does not require running the test suite (only auditing it), which means a broken test would go undetected — adding optional pytest run steps would strengthen the audit. T15 is comprehensive: all CA-1 through CA-28 are explicitly listed, both pytest commands are present, gitleaks is present, all 6 manual verification steps are described, and the streamlit smoke check is present. No task files require modification."
+}

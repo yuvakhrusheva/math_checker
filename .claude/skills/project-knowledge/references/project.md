@@ -7,53 +7,43 @@ This file provides high-level project overview for AI agents. Helps agents under
 
 ## Project Overview
 
-**Name:** [Project Name]
+**Name:** math_checker
 
-**Description:** [One-line description of what this project does]
+**Description:** Local tool for AI-powered grading of handwritten math monitoring tests for 2nd and 3rd grade students in Azerbaijan.
 
-[Optional: 1-2 additional sentences with key context]
+The tool takes scanned PDF worksheets uploaded to Google Drive, recognizes students' handwritten answers using a vision LLM, grades them against predefined criteria, and exports results to Excel for analyst use.
 
 ---
 
 ## Target Audience
 
-**Primary users:** [Who uses this - e.g., "Developers building CLI tools", "Small business owners"]
+**Primary users:** Project coordinator (single operator) running the grading process after tests are collected.
 
-**Use case:** [Why they need it - e.g., "Need to automate deployment workflows", "Want to track inventory without complex software"]
+**Use case:** After a large-scale math monitoring session (~1200 students across 2 grades), the coordinator needs to grade all worksheets without doing it manually. They run this tool locally, assign metadata to each batch of scans, and receive a structured Excel file ready for analysis.
 
 ---
 
 ## Core Problem
 
-[What pain point are we solving? 2-3 sentences describing the problem this project addresses]
-
-[Example format: "Currently users have to [manual process]. This is slow/error-prone/expensive because [reason]. We solve this by [solution approach]."]
+Grading 1200 handwritten math worksheets manually is slow, labor-intensive, and inconsistent. Each worksheet has 16 tasks with multi-level scoring criteria (0 / partial credit / full credit), making standardization hard. The tool automates recognition and scoring so the coordinator gets structured per-student results in one session, and analysts can immediately work with the data.
 
 ---
 
 ## Key Features
 
-[List 3-5 core capabilities - only the most important ones. Details belong in project backlog.]
-
-- **[Feature 1 name]** - [What it does in 1 sentence]
-- **[Feature 2 name]** - [What it does in 1 sentence]
-- **[Feature 3 name]** - [What it does in 1 sentence]
-- **[Feature 4 name]** - [What it does in 1 sentence]
-- **[Feature 5 name]** - [What it does in 1 sentence]
-
-<!--
-Feature backlog, detailed roadmap, and development phases live in the project backlog
-(see CLAUDE.md for backlog path), not here. This file is a stable overview.
--->
+- **Google Drive folder intake** - App traverses a root Google Drive folder, finds all leaf folders with scans, and presents them for metadata entry
+- **Metadata assignment** - Operator fills per-folder metadata: school, teacher, class number and letter, project participation flag, language (auto-detected or manual), test date
+- **AI recognition and grading** - Each PDF page is converted to an image and sent to a vision LLM (via LiteLLM) with task-specific grading prompts; the model returns recognized answers and scores per task
+- **8 test configurations** - Supports all combinations: grade 2/3 × Russian/Azerbaijani sector × Variant 1/2 — each with its own answer key and scoring criteria loaded from JSON
+- **Excel export** - Produces a two-sheet Excel file: recognized answers per student and scores per task with totals and performance levels
 
 ---
 
 ## Out of Scope
 
-[What we explicitly DON'T do - helps agents avoid scope creep]
-
-- [Thing 1 we don't support - e.g., "No mobile app version"]
-- [Thing 2 we don't support - e.g., "No multi-tenant support"]
-- [Thing 3 we don't support - e.g., "No real-time collaboration features"]
-
-<!-- Add more items as needed -->
+- No web deployment or multi-user access — runs locally only
+- No teacher- or student-facing interfaces
+- No real-time dashboard or live reporting
+- No direct integration with school information systems
+- No automatic scan quality enhancement or deskewing
+- No support for other subjects or grade levels (at this stage)

@@ -1,0 +1,26 @@
+{
+  "task": "Task 3: Criteria JSON loader",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "src/criteria_loader.py:6",
+      "issue": "CRITERIA_DIR = Path('criteria') is a relative path, so it depends on CWD being the project root. This is consistent with DB_PATH in db.py and acceptable for a local Streamlit app.",
+      "suggestion": "No change required for this use case."
+    },
+    {
+      "severity": "info",
+      "location": "src/criteria_loader.py:61-86",
+      "issue": "save_criteria_file has two layers of path-traversal protection (name/separator check + is_relative_to). This is defense-in-depth and correct. Since the filename must match the regex pattern (which disallows slashes), the first check effectively catches all traversal attempts before the second check is needed.",
+      "suggestion": "No change required. Double-check is good practice."
+    },
+    {
+      "severity": "info",
+      "location": "src/criteria_loader.py",
+      "issue": "load_criteria does not validate that the loaded file's contents match the filename (grade/language/variant). Malformed files on disk would load without error.",
+      "suggestion": "Acceptable as-is — files are written via save_criteria_file which validates. If direct disk edits are a concern, add validation in load_criteria too."
+    }
+  ]
+}

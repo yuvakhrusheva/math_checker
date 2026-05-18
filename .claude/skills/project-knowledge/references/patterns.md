@@ -7,97 +7,83 @@ For universal coding standards, see `~/.claude/skills/code-writing/references/un
 
 ## Project-Specific Code Patterns
 
-<!--
-ADD PROJECT-SPECIFIC PATTERNS HERE:
+### LLM calls via LiteLLM
+All LLM calls go through LiteLLM. Never call provider SDKs (anthropic, openai) directly. Model name comes from `config/settings.json`. This makes provider switching a one-line config change.
 
-1. Framework conventions (React hooks, Django patterns, FastAPI dependencies, etc.)
-2. Domain naming (Order/Cart/Product vs Purchase/Basket/Item)
-3. External integration patterns (Stripe webhooks, API retry logic, etc.)
-4. Database patterns (transactions, query optimization, caching)
+### Grading criteria as JSON
+Each of the 8 test configurations has its own JSON file in `criteria/`. The file contains: answer key per task, max score, scoring tiers (full / partial / zero), and the conditions for each tier. Grading prompts are constructed dynamically from these files — never hardcode criteria in Python.
 
-Only add patterns SPECIFIC to this project. Don't add generic advice.
-Empty section is fine for simple projects.
--->
+### Resumable processing
+Before processing a student PDF, always check `students.status` in SQLite. Skip already-processed students. This allows restarting after interruption without re-spending API tokens.
+
+### Folder naming convention for test variant detection
+Language can be auto-detected from scan content by the LLM, but grade and variant must be confirmed by the operator in the metadata form. Never infer grade/variant from folder names — too unreliable.
 
 ---
 
 ## Git Workflow
 
-<!--
-SCALING HINT: If this section grows beyond ~80 lines, extract to references/git-workflow.md.
--->
-
 ### Branch Structure
 
-- **`main`** - Production-ready code (protected). Only merge from `dev` after full testing. Triggers production deployment.
-- **`dev`** - Active development. All work happens here. Triggers staging deployment.
+- **`master`** - Stable, tested code. Merge from `dev` only after manual verification.
+- **`dev`** - Active development. All work happens here.
 
 ### Testing Requirements
 
-- **On commit:** Code changed → Unit + Integration tests. Docs only → Skip tests.
-- **On merge to dev:** Unit + Integration (auto). E2E (optional).
-- **On merge to main:** Unit + Integration (auto). E2E (strongly recommended).
+- **On commit:** Run unit tests if logic files changed. Skip for config/docs changes.
+- **On merge to main:** Full manual verification run on a sample of real scans.
 
 ### Security & Quality Gates
 
-- **Pre-commit:** Gitleaks scans for secrets (API keys, tokens, credentials). Commit blocked if detected.
-- **Pre-push:** Code review agent validates changes. All checks must pass.
+- **Pre-commit:** Gitleaks scans for secrets (API keys, tokens). Commit blocked if detected.
+- **Pre-push:** Code review agent validates changes.
 
 ---
 
 ## Testing & Verification
 
-<!--
-SCALING HINT: If this section grows beyond ~60 lines, extract to references/testing.md.
-This section stores proven verification approaches discovered during development.
-Generic testing methodology lives in ~/.claude/skills/test-master/.
--->
-
 ### Test Infrastructure
 
-[How to run tests: framework, runner, test DB setup, environment requirements.]
+`pytest` for unit tests. Run with `pytest tests/`.
+
+Key areas to test:
+- Grading logic (score calculation from LLM output)
+- Criteria JSON parsing
+- Excel export structure (correct sheet names, column headers, formulas)
 
 ### Agent Verification Methods
 
-[Proven methods for agent to verify features. Updated as new methods are discovered.]
-
-<!-- Example:
-### Telegram Bot
-**Method:** Telegram MCP
-**Setup:** Bot must be running, test user configured
-**Discovered:** 2026-01-15, during messaging feature
--->
+**Grading logic**
+- Use saved LLM response fixtures (JSON) to test scoring without actual API calls
+- Fixtures stored in `tests/fixtures/llm_responses/`
 
 ### User Verification Methods
 
-[Methods that require user involvement.]
-
-<!-- Example:
-### Visual UI Check
-**What to check:** Layout renders correctly on mobile
-**How:** Open on phone, verify responsive layout
-**Why agent can't:** No visual rendering capability
--->
+**End-to-end check**
+- Run on 5-10 real scans from a known class, compare AI scores to manually graded sample
+- Spot-check Excel output for correct student count, no missing scores, correct totals
 
 ---
 
 ## Business Rules
 
-<!--
-SCALING HINT: If this section grows beyond ~60 lines, extract to references/business-rules.md.
-DELETE THIS SECTION if project has no complex domain logic (simple CRUD, CLI tool, utility).
+### Test Configurations
+8 variants total: grade (2/3) × language (ru/az) × variant (1/2).
+Each maps to a criteria JSON file. Selection is based on operator-entered metadata — never auto-inferred.
 
-Use for: multi-step workflows, state machines, calculation formulas, domain constraints.
--->
+### Scoring Tiers (all tasks)
+Three tiers only: full credit / partial credit / zero. No other values.
+Partial credit conditions are task-type specific (see criteria JSON files).
 
-<!-- Example:
-### Order Lifecycle
-pending → paid → shipped → delivered
-- Cancel: only if pending or paid
-- Refund: full if pending, partial if paid, none after shipped
+### Performance Levels (grade 3, 100-point scale)
+- 81–100 points → Advanced (Продвинутый)
+- 61–80 points → Basic (Базовый)
+- 31–60 points → Minimal (Минимальный)
+- 0–30 points → Insufficient (Недостаточный)
 
-### Pricing
-final_price = (subtotal - discount) * (1 + tax_rate) + shipping
-- Discount applies BEFORE tax
-- Free shipping if subtotal > $50
--->
+**Grade 2 performance levels: TBD** — to be defined when grade 2 criteria files are provided. Until then, grade 2 Excel output should include total score but leave the performance level column blank or marked "TBD".
+
+### Excel Output Structure
+- **Sheet 1 "Answers":** one row per student, columns = metadata fields + one column per task (recognized answer text)
+- **Sheet 2 "Scores":** one row per student, columns = metadata fields + score per task + total score + performance level
+- Row order: grouped by school, then by class, then by student filename

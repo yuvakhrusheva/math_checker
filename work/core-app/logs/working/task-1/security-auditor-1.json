@@ -1,0 +1,65 @@
+{
+  "reviewer": "security-auditor",
+  "task": 1,
+  "round": 1,
+  "status": "needs_fixes",
+  "findings": [
+    {
+      "severity": "warning",
+      "owasp": "A09",
+      "file": "app.py",
+      "issue": "validate_config() echoes the raw key_path value from the environment variable directly into ValueError messages (lines 36, 40-41). These messages are then forwarded verbatim to st.error() in main(). Although the path itself is not a credential, exposing the file-system layout of the host (e.g. '/home/yuvakon/keys/math_checker_sa.json') in a UI error message is an information-disclosure risk. In a multi-user or shared-screen scenario this leaks the user account name and directory structure.",
+      "recommendation": "Truncate or sanitise the path before embedding it in user-facing messages. For the 'does not exist' case, consider logging the full path at DEBUG level (server-side only) and showing the UI a shorter message such as: \"GOOGLE_SERVICE_ACCOUNT_JSON points to a file that does not exist. Check the server logs for details.\""
+    },
+    {
+      "severity": "warning",
+      "owasp": "A05",
+      "file": "app.py",
+      "issue": "validate_config() checks that the path is absolute and that the file exists, but does NOT verify that the path resolves to a location outside the repository root. A symlink or a path such as '/absolute/path/../../math_checker/app.py' passes all three checks while still pointing inside the repo. The task spec explicitly requires the file to be stored outside the repository root, but this constraint is never enforced in code.",
+      "recommendation": "After confirming the path is absolute, resolve it with os.path.realpath() and compare it against the resolved repository root (e.g. os.path.realpath(os.path.dirname(__file__))). Raise ValueError if the resolved key path starts with the resolved repo root."
+    },
+    {
+      "severity": "warning",
+      "owasp": "A05",
+      "file": "requirements.txt",
+      "issue": "All eleven dependencies are pinned with >= (minimum-version) constraints rather than == (exact-version) locks. This means pip install -r requirements.txt can silently pull in a newly-published version that contains a vulnerability or a breaking change. Minimum-version pins provide reproducibility only if accompanied by a separate lock file. No lock file (pip freeze output / pip-compile-generated requirements.lock) is present in the repository.",
+      "recommendation": "Generate a deterministic lock file with pip-compile (pip-tools) or use pip freeze > requirements.lock after a known-good install, and commit it. The >= constraints in requirements.txt are fine as the human-editable source of truth, but the lock file must be what is actually installed in production and CI."
+    },
+    {
+      "severity": "info",
+      "owasp": "A05",
+      "file": "requirements.txt",
+      "issue": "litellm>=1.40 — litellm has had several CVEs and rapid patch releases in the 1.x series (e.g. prompt-injection passthrough, credential-logging issues reported in 2024). Pinning only to >=1.40 means any vulnerable minor release in the 1.40–1.x range will be accepted without warning.",
+      "recommendation": "Track litellm's release notes and security advisories actively. Once a lock file is in place (see above finding), the exact version is pinned and this risk is mitigated."
+    },
+    {
+      "severity": "info",
+      "owasp": "A05",
+      "file": ".pre-commit-config.yaml",
+      "issue": "The gitleaks hook version is pinned to rev: v8.18.4. This is a concrete, immutable git tag — correct practice. However, there is no SHA-pinning (using: rev: <commit-sha>). A tag on GitHub can theoretically be force-moved by the upstream maintainer, making the pin mutable in that edge case.",
+      "recommendation": "For maximum supply-chain integrity, pin to the commit SHA rather than the tag (rev: <40-char-sha>). This is a low-priority hardening step; the current tag pin is already far better than a branch pin."
+    },
+    {
+      "severity": "info",
+      "owasp": "A05",
+      "file": ".pre-commit-config.yaml",
+      "issue": "Only gitleaks is configured. There is no hook for detecting accidentally committed .env files by name/pattern (complementary to content scanning), no trailing-whitespace or end-of-file-fixer hooks, and no check-added-large-files hook that could catch a developer accidentally staging a large PDF or a binary key file.",
+      "recommendation": "Consider adding the standard pre-commit hooks (repo: https://github.com/pre-commit/pre-commit-hooks) with at minimum: check-added-large-files, detect-private-key, and check-merge-conflict. These are lightweight and complement gitleaks."
+    },
+    {
+      "severity": "info",
+      "owasp": "A05",
+      "file": ".env.example",
+      "issue": "No actual secrets are present. GOOGLE_SERVICE_ACCOUNT_JSON=/absolute/path/to/service_account.json and ANTHROPIC_API_KEY=your_anthropic_api_key_here are clearly placeholder values. The file is correctly whitelisted in .gitignore via !.env.example.",
+      "recommendation": "No action required. The .env.example is clean."
+    },
+    {
+      "severity": "info",
+      "owasp": "A05",
+      "file": ".gitignore",
+      "issue": "data/ and criteria/ are correctly excluded, protecting student PII (downloaded PDFs) and exam content from accidental commits. The .env / .env.* pattern (with !.env.example exception) is correctly structured. The wildcard patterns *api-key*, *apikey*, *secret* provide useful defense-in-depth but note that *secret* would also block any file whose name contains the word 'secret', which may cause confusion if developers create legitimately-named files.",
+      "recommendation": "No blocking issues. The .gitignore is well-structured for this project's security requirements."
+    }
+  ],
+  "summary": "Two warnings require fixes before approval: (1) raw file-system paths are echoed into the Streamlit UI via st.error(), leaking host layout; (2) validate_config() does not enforce that the key file resides outside the repository root despite the spec requiring it. Dependency lock file is absent, increasing supply-chain risk."
+}

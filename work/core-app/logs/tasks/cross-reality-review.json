@@ -1,0 +1,119 @@
+{
+  "validator": "reality-checker-cross",
+  "status": "fail",
+  "findings": [
+    {
+      "type": "duplicate_init",
+      "severity": "warning",
+      "tasks_involved": [1, 2],
+      "issue": "Task 1 creates a stub src/db.py with a no-op init_db() so app.py can import it. Task 2 replaces it with the real implementation. If both tasks are executed by different agents in the same worktree (wave 2 is parallel), there is a window where the stub is present and any smoke check against the real init_db() could silently pass against the stub, masking a broken implementation. The stub is intentional per T1 Details, but it is not marked as 'must be overwritten' in T2, only 'replaced'.",
+      "recommendation": "Add an explicit assertion in T2's TDD anchor test_init_db_creates_tables that verifies the tables actually exist (not just that init_db() runs without error), ensuring the stub cannot accidentally pass T2 tests."
+    },
+    {
+      "type": "duplicate_init",
+      "severity": "warning",
+      "tasks_involved": [1, 2, 9],
+      "issue": "init_db() is called in app.py (T1) on every Streamlit startup. The tech-spec says it must be idempotent (CREATE TABLE IF NOT EXISTS). T2 spec confirms idempotency. However, T9 (Main screen UI) also reads from db.py but never mentions calling init_db() itself — this is fine because init_db() is already called by app.py at startup. The risk is that if T9's tests construct an in-memory or temporary SQLite DB directly without calling init_db(), they may silently test against a pre-initialized fixture rather than ensuring the schema is always initialized via app.py. This is a test isolation concern, not a production concern.",
+      "recommendation": "T9's test_main_helpers.py should call init_db() in its test fixtures or conftest, not rely on a manually pre-built schema fixture."
+    },
+    {
+      "type": "mapping_gap",
+      "severity": "critical",
+      "tasks_involved": [6, 2, 7],
+      "issue": "The LLM response schema (tech-spec + T6) returns a field named 'notes' per task. The SQLite schema (T2) stores this as 'grading_notes' in task_results. T6's grader.py parses the LLM response and must explicitly rename 'notes' -> 'grading_notes' before passing data to db.save_task_result(). T7's queue_processor.py calls grader.grade_student() and then saves task_results to DB — it must also handle this mapping. Neither T6 nor T7 explicitly calls out this field rename in their 'What to do' sections or implementation hints. The field mapping is implicit and could be missed.",
+      "recommendation": "Add to T6's Details section an explicit line: 'When building the task_result dict from LLM response, map response field \"notes\" to DB column \"grading_notes\".' Add the same note to T7's student pipeline steps."
+    },
+    {
+      "type": "inconsistent_pattern",
+      "severity": "warning",
+      "tasks_involved": [6, 10],
+      "issue": "T6's scorer.py defines compute_score(recognized_answer, task_criteria) -> tuple[float, str] where the second return value is 'grading_notes' (a string). T10's Review Panel calls scorer.compute_score() with a new answer and saves the result with manually_corrected=1. T10 says 'save the result to DB with manually_corrected=1' but does not mention saving the updated grading_notes string (the second return value of compute_score). If T10 only saves the score but not the recalculated notes, the grading_notes column will still contain the original LLM-generated note after manual correction.",
+      "recommendation": "T10's test_score_recalculation_updates_db TDD anchor should explicitly assert that grading_notes is updated in task_results, not just the score and manually_corrected flag."
+    },
+    {
+      "type": "inconsistent_pattern",
+      "severity": "warning",
+      "tasks_involved": [4, 5, 7, 10],
+      "issue": "PDF path format is consistently specified as data/downloads/{cohort_id}/{filename} across T4 (download destination), T7 (queue_processor reads path to pass to pdf_processor), and T10 (review panel reconstructs path as data/downloads/{cohort_id}/{filename}). However, T4 says 'sanitized_filename' is written to disk, while T10 says the 'filename' stored in the students table is used to reconstruct the path. If T4 sanitizes the filename before writing to disk (e.g. replacing spaces, stripping path separators) but stores the original (unsanitized) filename from Drive in students.filename, then T10 will reconstruct a path that does not match the actual file on disk.",
+      "recommendation": "T4 must store the sanitized filename in the DB (students.filename = sanitized_filename), not the original Drive filename. T4's Details section should state this explicitly. Add a test in test_drive.py that asserts the filename written to disk matches what would be stored in the DB."
+    },
+    {
+      "type": "inconsistent_pattern",
+      "severity": "warning",
+      "tasks_involved": [4, 7],
+      "issue": "T4 specifies that download failures return None and an error dict (not an exception): 'return None and error info dict {\"file_id\": ..., \"error\": str(e)}'. T7's pipeline step 2 says 'if fails: set status=error, error_message=sanitized exception, continue'. The sanitization in T7 is described as redacting API keys from exception message strings. But if T4 returns str(e) already in the error dict, and T7 reads that string and sanitizes it, this works. However T7's sanitize_error_message function must be applied to error_dict[\"error\"], not to an exception object directly. This coordination is not spelled out in either task.",
+      "recommendation": "T7's Details section should explicitly state: 'Apply sanitize_error_message() to the error string from the drive.download_pdf() error dict before storing in students.error_message.'"
+    },
+    {
+      "type": "inconsistent_pattern",
+      "severity": "warning",
+      "tasks_involved": [6, 7],
+      "issue": "T6 specifies that json.JSONDecodeError is 'propagated to caller (not swallowed)'. T7 lists handling JSONDecodeError in the pipeline: 'if JSONDecodeError: set status=error, continue'. This is consistent. However T7 does not mention sanitizing the json.JSONDecodeError message before writing it to students.error_message. A JSONDecodeError message typically contains the raw LLM response text, which could potentially contain sensitive content from the LLM output (though not API keys). The sanitizer defined in T7 targets API key patterns — it would not redact arbitrary LLM output content.",
+      "recommendation": "For JSONDecodeError, store a generic fixed message like 'LLM response could not be parsed as JSON' rather than str(e), since the raw LLM response in the error message is not useful to the operator and could be large."
+    },
+    {
+      "type": "test_isolation",
+      "severity": "critical",
+      "tasks_involved": [4, 7],
+      "issue": "T4 (test_drive.py) and T7 (test_queue_processor.py) both use real Google Drive integration tests that write downloaded PDFs to data/downloads/{cohort_id}/. If both test suites are run in the same pytest session or same environment, and they use the same TEST_GDRIVE_FOLDER_ID, they will write to the same disk location. T7's test_full_pipeline_5_students creates cohort records in the real SQLite DB (or a test DB). There is no mention in either task of using a separate test database path or a temp directory for downloads, creating a shared state risk between test runs.",
+      "recommendation": "Both T4 and T7 integration tests should use pytest tmp_path or a dedicated test directory (e.g. data/test_downloads/) that is cleaned up after each test. T7 should use an in-memory or isolated SQLite DB for integration tests rather than the production data/results.db."
+    },
+    {
+      "type": "test_isolation",
+      "severity": "warning",
+      "tasks_involved": [7, 2],
+      "issue": "T7's integration test test_resumability pre-seeds 3 students as 'processed' with existing task_results in SQLite, then runs the full pipeline. T2 specifies save_task_result() uses INSERT OR REPLACE (upsert). If test_resumability uses the same DB as test_full_pipeline_5_students (run in the same pytest session), the pre-seeded rows from the resumability test could persist into subsequent tests or corrupt the assertion counts in test_full_pipeline_5_students.",
+      "recommendation": "T7 integration tests must use isolated DB instances per test (via fixture with tmp_path or test-specific DB filename), not a shared data/results.db. This should be enforced in conftest.py."
+    },
+    {
+      "type": "hidden_dep",
+      "severity": "warning",
+      "tasks_involved": [7, 6],
+      "issue": "T7 depends on tasks 4, 5, 6 (listed in depends_on), but also implicitly depends on T2 (db.py) — which is listed in T7's Context Files but not in its depends_on header. This is a metadata inconsistency that could cause a wave execution system to schedule T7 before T2 is complete if it strictly follows depends_on.",
+      "recommendation": "T7's depends_on should include task 2: 'depends_on: [2, 4, 5, 6]'."
+    },
+    {
+      "type": "hidden_dep",
+      "severity": "warning",
+      "tasks_involved": [8, 2],
+      "issue": "T8 (Criteria Management UI) lists depends_on: [3] only. However T8's Context Files explicitly lists src/db.py. The page itself likely does not write to the DB directly (criteria are stored as files, not in SQLite), but it does list src/db.py as a read dependency. If T8 is executed before T2, the real db.py would not yet exist. The depends_on: [3] is technically sufficient only if criteria_management.py does not import db.py at all.",
+      "recommendation": "Verify that pages/criteria_management.py will not import src/db.py at module level. If it does (even for future extensibility), add task 2 to T8's depends_on. If it truly does not need db.py, remove it from Context Files to avoid confusion."
+    },
+    {
+      "type": "hidden_dep",
+      "severity": "info",
+      "tasks_involved": [11, 7],
+      "issue": "T11 lists depends_on: [7, 8] but its description says 'tasks 7 (DB schema) and 8 (student data)' in the Dependencies comment. Task 7 is the queue_processor, not the DB schema — T2 is the DB schema. T11's actual dependency should be T2 (for the DB layer used by exporter.py). T7 is not needed for exporter.py to function; the exporter only reads from SQLite and does not use queue_processor.",
+      "recommendation": "T11's depends_on comment 'tasks 7 (DB schema)' is mislabeled — T7 is queue_processor, T2 is DB schema. The depends_on: [7, 8] may be correct in practice (since T7 depends on T2, the transitive dependency is satisfied), but the comment should be corrected to avoid confusion during execution."
+    },
+    {
+      "type": "hidden_dep",
+      "severity": "critical",
+      "tasks_involved": [7, 3],
+      "issue": "T7 (queue_processor) calls grader.grade_student() which requires criteria to be loaded via criteria_loader.load_criteria(). This means T7 has an indirect dependency on T3 (criteria_loader.py) — but T3 is not in T7's depends_on: [2, 4, 5, 6]. If T7 is implemented before T3, the criteria loading will fail at runtime. T3 is a Wave 2 task and T7 is Wave 4, so the wave ordering protects against this in normal execution, but the depends_on metadata is incomplete.",
+      "recommendation": "Add task 3 to T7's depends_on: 'depends_on: [2, 3, 4, 5, 6]'."
+    },
+    {
+      "type": "mapping_gap",
+      "severity": "warning",
+      "tasks_involved": [6, 7, 2],
+      "issue": "T6's grader.py grade_student() returns 'a structured result dict'. T7's queue_processor calls grader.grade_student() and then saves task_results to DB. The exact shape of the result dict returned by grade_student() is not formalized in T6 beyond 'parsed LLM response dict'. It is ambiguous whether grade_student() returns the raw LLM response dict (with 'notes' field) or a processed dict with field names already mapped to the DB schema (with 'grading_notes'). T7 must know which format to expect to correctly pass data to db.save_task_result().",
+      "recommendation": "T6 should explicitly define the return type of grade_student() as either: (a) the raw LLM response dict (caller maps fields) or (b) a DB-ready dict with 'grading_notes'. Option (b) is preferable. Define a clear contract in T6's Details section."
+    },
+    {
+      "type": "test_isolation",
+      "severity": "warning",
+      "tasks_involved": [15],
+      "issue": "T15 (Pre-deploy QA) runs pytest tests/unit/ and pytest tests/integration/ as sequential suites. There is no end-to-end test that exercises the FULL flow T1→T15 as a single automated scenario (Streamlit UI → add cohort → process → review → export). T15's manual verification step 3 ('Run full pipeline on 5-PDF test folder') covers the pipeline but requires manual operator execution. The tech-spec explicitly states 'No E2E tests — replaced by manual validation run'. This is an accepted design choice, but the only automated integration coverage of the full pipeline is test_full_pipeline_5_students in T7, which does not cover the UI layer or the export step.",
+      "recommendation": "Acceptable as-is per tech-spec decision. However, document in T15's Details that test_full_pipeline_5_students (T7) is the closest automated equivalent to an E2E pipeline test and must be run as part of pre-deploy QA even if not an E2E test in the Playwright sense."
+    },
+    {
+      "type": "inconsistent_pattern",
+      "severity": "warning",
+      "tasks_involved": [7, 13],
+      "issue": "T7 defines sanitization patterns for API keys: 'sk-[A-Za-z0-9]+', 'AIza[A-Za-z0-9_-]+', and long base64-like sequences. T13's security audit scope explicitly lists 'Bearer' and 'OAuth tokens' as additional patterns to check. The sanitizer in T7 does not include 'Bearer' token patterns or generic OAuth token formats. T13 is an audit task that may flag this gap — but by the time T13 runs (Wave 6), T7 is already implemented (Wave 4), requiring a retroactive fix.",
+      "recommendation": "Extend T7's sanitization patterns to include 'Bearer [A-Za-z0-9._-]+' and 'ya29\\.[A-Za-z0-9._-]+' (Google OAuth access token format) in the initial implementation, not discovered only at audit time."
+    }
+  ],
+  "summary": "16 cross-task findings: 2 critical (notes->grading_notes mapping gap never explicitly handled in T6/T7; T7 missing T3 in depends_on), 11 warnings (sanitized filename not confirmed to persist to DB causing T10 path reconstruction risk; test isolation between T4/T7 integration tests sharing Drive folder and disk paths; grader.py return type contract underspecified; OAuth/Bearer tokens missing from sanitizer), 3 info-level issues — no full E2E automated test exists by design, which is acceptable per tech-spec."
+}

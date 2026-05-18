@@ -1,0 +1,20 @@
+{
+  "task": "Task 5: PDF processor",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/unit/test_pdf_processor.py",
+      "issue": "All 6 TDD anchors present and passing. JPEG magic bytes check is a strong assertion. Both single-page and multi-page fixtures are in the repo.",
+      "suggestion": "No changes needed."
+    },
+    {
+      "severity": "info",
+      "location": "tests/unit/test_pdf_processor.py",
+      "issue": "Missing test for 0-page PDF. spec mentions this as an edge case.",
+      "suggestion": "Add: create doc with no pages via fitz, verify UnreadablePDFError is raised."
+    }
+  ]
+}

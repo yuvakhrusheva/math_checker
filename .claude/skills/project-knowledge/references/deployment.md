@@ -7,23 +7,28 @@ Deployment process, infrastructure, and production operations for AI agents.
 
 ## Deployment Platform
 
-**Platform:** [Where it deploys - e.g., "Vercel" / "Railway" / "AWS EC2" / "VPS"]
+**Platform:** Local machine (no cloud deployment)
 
-**Type:** [e.g., "Serverless" / "Container (Docker)" / "Static hosting" / "Browser extension"]
+**Type:** Local Python app, launched via terminal
 
-**Why this platform:** [One reason - e.g., "Free tier covers our needs" / "Need full server control"]
+**Why:** Single operator, minimal infrastructure, no need for hosting or multi-user access
 
 ---
 
-## Access Information
+## Running the App
 
-**SSH Access:**
-- Production: `ssh user@server-ip` [e.g., `ssh root@123.45.67.89`]
-- Staging: [if applicable]
+```bash
+# Install dependencies
+pip install -r requirements.txt
 
-> If not configured, agent will request: server address, username, and port.
+# Set up environment variables (copy and fill in)
+cp .env.example .env
 
-**Credentials location:** [e.g., "GitHub Actions secrets" / "1Password vault"]
+# Launch
+streamlit run app.py
+```
+
+App opens automatically at `http://localhost:8501`.
 
 ---
 
@@ -31,81 +36,61 @@ Deployment process, infrastructure, and production operations for AI agents.
 
 **See:** [.env.example](../../.env.example) in project root
 
-[List all required environment variables with their purpose - NO VALUES]
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | API key for Claude models (if using Anthropic) |
+| `OPENAI_API_KEY` | API key for GPT-4o (if using OpenAI) |
+| `GEMINI_API_KEY` | API key for Gemini (if using Google) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Path to Google service account credentials file for Drive API |
 
-<!-- Keep .env.example updated. Comment each variable's purpose in that file. -->
+Only the API key for the configured LLM provider is required. Set the active model in `config/settings.json`.
 
 ---
 
 ## Deployment Triggers
 
-**Production:** [e.g., "Auto-deploy on push to `main` after tests pass"]
-
-**Staging:** [e.g., "Auto-deploy on push to `dev`"]
-
-**Preview:** [e.g., "Auto-deploy for every PR" / "Not configured"]
+No CI/CD. App runs locally on demand. No staging or production environments.
 
 ---
 
-## Pre-Deploy Checklist
+## Pre-Run Checklist
 
-[Only critical manual steps - if fully automated, write "Fully automated via CI"]
-
-- [ ] [e.g., "Run `npm run migrate:prod` if schema changed"]
-- [ ] [e.g., "Verify env vars set in platform dashboard"]
+- [ ] `.env` file filled with the correct API key for the configured LLM model
+- [ ] Google Drive service account has read access to the root folder with scans
+- [ ] `criteria/` folder contains JSON files for all test variants being processed
+- [ ] `data/` directory exists (created automatically on first run)
 
 ---
 
 ## Rollback Procedure
 
-**Platform rollback:** [e.g., "Vercel: 'Redeploy' on previous deployment" / "VPS: `git checkout <prev-commit>`"]
+If a processing run produces bad results:
+1. Delete `data/results.db` to reset all intermediate state
+2. Fix the issue (wrong criteria JSON, bad prompt, etc.)
+3. Re-run from scratch — resumable processing will skip nothing (fresh DB)
 
-**Manual steps if needed:** [e.g., "If DB migration broke: run rollback SQL from /migrations/rollbacks/"]
-
-**Approximate time:** [e.g., "~2 minutes" / "~10 minutes with DB rollback"]
+To redo only specific students: set their `status` back to `pending` in SQLite directly.
 
 ---
 
 ## Environments
 
-**Production:** [URL] - Deploys from `main` branch
-
-**Staging:** [URL] - Deploys from `dev` branch
-
-<!-- If single environment, only list Production -->
+**Local only:** `http://localhost:8501` — runs on operator's machine
 
 ---
 
 ## Monitoring & Observability
 
-<!--
-SCALING HINT: If this section grows beyond ~80 lines, extract to references/monitoring.md.
-If no monitoring configured, write: "Logs output to stdout only. No error tracking configured."
--->
-
 ### Logging
 
-**Where:** [e.g., "stdout (Docker logs)" / "CloudWatch" / "Local files"]
-**Format:** [e.g., "JSON structured" / "Plain text" / "Default framework logging"]
+**Where:** Streamlit UI (progress bar + status messages per student) + stdout
+**Format:** Plain text, human-readable
 
 ### Error Tracking
 
-**Tool:** [e.g., "Sentry" / "Rollbar" / "None"]
-**Config:** [e.g., "SENTRY_DSN in .env" / "Not configured"]
+**Tool:** None — errors shown inline in Streamlit UI with student filename and error message
+**Failed students** saved in SQLite with `status = error` and error message for review
 
 ### Health Checks
 
-**Endpoint:** [e.g., "GET /health" / "None"]
-**Checks:** [e.g., "DB connectivity, external API status" / "N/A"]
-
-<!-- Optional sections below — delete if not applicable -->
-
-### Metrics
-
-**Analytics:** [e.g., "Google Analytics" / "Vercel Analytics" / "None"]
-**Key metrics:** [e.g., "API response time, error rate" / "N/A"]
-
-### Alerts
-
-**Tool:** [e.g., "Sentry email alerts" / "PagerDuty" / "None"]
-**Rules:** [e.g., "Error rate > 5%" / "N/A"]
+Not applicable for local tool.

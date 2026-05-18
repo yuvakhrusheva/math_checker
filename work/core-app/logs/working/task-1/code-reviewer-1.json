@@ -1,0 +1,93 @@
+{
+  "reviewer": "code-reviewer",
+  "task": 1,
+  "round": 1,
+  "status": "needs_fixes",
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "app.py",
+      "line": 57,
+      "issue": "init_db() is called BEFORE validate_config(). The task spec explicitly requires config validation before any side-effects. When Task 2 replaces the stub with a real init_db() that opens/creates data/results.db, the DB will be created even when config is invalid. The call order is: validate_config() must come first, then init_db().",
+      "recommendation": "Swap the call order: call validate_config() first (lines 51-55), then call init_db() (line 58). This matches the 'fail fast before any UI' requirement stated in both task.md and the docstring of validate_config() itself."
+    },
+    {
+      "severity": "critical",
+      "file": "app.py",
+      "line": 61,
+      "issue": "st.navigation(pages) is called with four page paths (pages/criteria_management.py, pages/main.py, pages/review_panel.py, pages/export.py) that do not exist — pages/ only contains .gitkeep. Streamlit raises an unhandled exception (FileNotFoundError or InvalidPageError) at this line, outside the try/except ValueError block, causing an ungraceful crash instead of st.error(). This makes 'streamlit run app.py' unusable in its current state.",
+      "recommendation": "Create minimal stub files for all four pages (pages/criteria_management.py, pages/main.py, pages/review_panel.py, pages/export.py), each containing only `import streamlit as st` and `st.title('...')`. Alternatively, wrap the st.navigation block in a try/except and surface a graceful st.error if page files are missing. Stubs are simpler and match the task spec's intent."
+    },
+    {
+      "severity": "warning",
+      "file": "app.py",
+      "line": 22,
+      "issue": "validate_config() does not check for the LLM API key (ANTHROPIC_API_KEY or equivalent). The .env.example documents it as required, and grader.py (Task 6) will fail at the first LLM call with a cryptic authentication error if it is missing. This violates the 'fail fast with a clear error' principle that motivates validate_config().",
+      "recommendation": "Add a check in validate_config(): if the model in config/settings.json starts with 'claude', assert ANTHROPIC_API_KEY is set and non-empty; raise ValueError with a clear message if missing. Read the model name from config/settings.json to determine which key to require. This keeps validation in one place and surfaces the error at startup."
+    },
+    {
+      "severity": "warning",
+      "file": "app.py",
+      "line": 39,
+      "issue": "validate_config() does not verify that GOOGLE_SERVICE_ACCOUNT_JSON points to a readable file — only that it exists (os.path.isfile). On systems with strict permissions, a file can exist but be unreadable by the process. The error will surface later during Drive authentication (Task 4) as a cryptic PermissionError.",
+      "recommendation": "After os.path.isfile(), add: `if not os.access(key_path, os.R_OK): raise ValueError(f'GOOGLE_SERVICE_ACCOUNT_JSON file is not readable: {key_path!r}. Check file permissions.')`"
+    },
+    {
+      "severity": "warning",
+      "file": "app.py",
+      "line": 39,
+      "issue": "No validation that GOOGLE_SERVICE_ACCOUNT_JSON actually points to a file with a .json extension, or that the file contains valid JSON. An operator could accidentally point it at a binary file or empty file — the error will be a cryptic google.auth exception at Drive authentication time, not a clear startup error.",
+      "recommendation": "Add a lightweight validation step: attempt `json.load(open(key_path))` and check for a 'type' key (value 'service_account'). Wrap in try/except json.JSONDecodeError and raise a clear ValueError. This catches the most common misconfiguration (wrong file) at startup."
+    },
+    {
+      "severity": "warning",
+      "file": "tests/unit/test_app_startup.py",
+      "line": 24,
+      "issue": "All five test assertions accept either ValueError OR SystemExit (`pytest.raises((ValueError, SystemExit))`). validate_config() only raises ValueError — SystemExit is never raised by this function. Accepting SystemExit broadens the pass condition unnecessarily: if a future refactor replaces `raise ValueError(...)` with `sys.exit(...)`, the tests would still pass even though the informative message is gone (sys.exit() with a non-zero code produces a less useful error than ValueError).",
+      "recommendation": "Use `pytest.raises(ValueError)` exclusively in these tests. If the intent is also to test Streamlit's st.stop() (which raises StopException internally), that belongs in a separate integration test against a running Streamlit app, not in unit tests of validate_config()."
+    },
+    {
+      "severity": "warning",
+      "file": "tests/unit/test_app_startup.py",
+      "line": 11,
+      "issue": "_reload_validate() deletes sys.modules['app'] and reimports the module on every call. Because load_dotenv() runs at module level in app.py, this re-executes load_dotenv() for every test. If a real .env file exists in the working directory with GOOGLE_SERVICE_ACCOUNT_JSON set, it will override monkeypatch.delenv() values set earlier in the test, causing intermittent failures on developer machines.",
+      "recommendation": "Pass `override=True` to load_dotenv() in app.py (so explicit env vars set by monkeypatch take priority over .env) OR patch dotenv.load_dotenv to a no-op inside _reload_validate() using monkeypatch.setattr. The first option is a one-line fix in app.py that also benefits production use."
+    },
+    {
+      "severity": "warning",
+      "file": "tests/unit/test_app_startup.py",
+      "line": null,
+      "issue": "Missing test for whitespace-only env var value (e.g., GOOGLE_SERVICE_ACCOUNT_JSON='   '). The task spec explicitly lists this as an edge case ('empty string is treated as not set'). The implementation handles it correctly via .strip(), but there is no test covering it.",
+      "recommendation": "Add a test: `monkeypatch.setenv('GOOGLE_SERVICE_ACCOUNT_JSON', '   ')` and assert ValueError is raised. This documents the intent and guards against regressions if .strip() is removed."
+    },
+    {
+      "severity": "warning",
+      "file": "tests/unit/test_app_startup.py",
+      "line": null,
+      "issue": "Missing test for a path that is an absolute path to a directory (not a file). `os.path.isfile()` returns False for directories, so the current implementation would correctly raise ValueError, but there is no explicit test for this edge case. A user might accidentally set the env var to the directory containing the key file.",
+      "recommendation": "Add a test: `monkeypatch.setenv('GOOGLE_SERVICE_ACCOUNT_JSON', str(tmp_path))` (tmp_path is a directory) and assert ValueError is raised with a message referencing the path."
+    },
+    {
+      "severity": "info",
+      "file": "app.py",
+      "line": 71,
+      "issue": "The entrypoint guard `if __name__ == '__main__' or 'streamlit' in sys.modules` is a non-standard pattern. The conventional Streamlit entrypoint is to have the main body at module level (or just `if __name__ == '__main__': main()`). The `'streamlit' in sys.modules` branch is intended to make `streamlit run app.py` work, but Streamlit imports the script as __main__ anyway, so the `__name__ == '__main__'` branch alone is sufficient. The extra condition is redundant and could cause confusing behavior if streamlit is imported as a side-effect of another import.",
+      "recommendation": "Replace with the standard Streamlit pattern: remove the guard entirely and call `main()` at module level, or use only `if __name__ == '__main__': main()`. Streamlit executes the script as __main__ so `main()` will be called correctly."
+    },
+    {
+      "severity": "info",
+      "file": "requirements.txt",
+      "line": null,
+      "issue": "pytest and pytest-mock are listed in the main requirements.txt alongside production dependencies. For a local single-operator tool this is acceptable, but it means anyone doing `pip install -r requirements.txt` in a production-like environment also installs test tooling.",
+      "recommendation": "Consider splitting into requirements.txt (production) and requirements-dev.txt (pytest, pytest-mock) with `requirements-dev.txt` containing `-r requirements.txt` at the top. This is a low-priority improvement for a local tool."
+    },
+    {
+      "severity": "info",
+      "file": "config/settings.json",
+      "line": null,
+      "issue": "The model name 'claude-3-5-sonnet-20241022' may be deprecated or superseded by April 2026 (current date: 2026-04-20). LiteLLM will raise an error at first grading call if the model is retired.",
+      "recommendation": "Update to a current model name (e.g., claude-sonnet-4-5 or the latest stable Anthropic model available as of implementation date). Since this is a config file, no code change is needed — just update the value."
+    }
+  ],
+  "summary": "2 critical issues block correct operation: init_db() runs before validate_config() (wrong order), and missing page stub files cause an ungraceful crash on startup; 5 warnings cover missing LLM key validation, file readability check, JSON content validation, test over-permissiveness, and a load_dotenv re-execution risk in tests."
+}

@@ -1,0 +1,32 @@
+{
+  "task": "Task 6: LLM grader and scoring engine",
+  "reviewer": "code-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "warning",
+      "location": "src/grader.py:_load_settings",
+      "issue": "_load_settings() reads from disk on every grade_student() call. For 1200 students this is 1200 unnecessary disk reads. settings.json is static — load once at module level.",
+      "suggestion": "Cache settings: _SETTINGS = _load_settings() at module level, then use _SETTINGS in grade_student()."
+    },
+    {
+      "severity": "warning",
+      "location": "src/scorer.py",
+      "issue": "scorer.py has no partial-credit tier handling. When a task has a 'partial' tier, the current implementation only checks if the answer matches correct_answers — if it doesn't match, it falls to zero. There is no mechanism to return a partial score based on partial matching.",
+      "suggestion": "For this project's criteria format, tiers are checked against the answer. Document explicitly that partial scoring requires a tier with label='partial' AND that correct_answers matching is full-credit only. The current tests don't test a real partial scenario — this is acceptable if partial tiers are not used in practice, but should be documented."
+    },
+    {
+      "severity": "info",
+      "location": "src/grader.py:grade_student",
+      "issue": "grade_student propagates json.JSONDecodeError to caller as documented. litellm exceptions are also propagated. Both behaviors match the spec.",
+      "suggestion": "No change needed."
+    },
+    {
+      "severity": "info",
+      "location": "src/grader.py:_parse_llm_response",
+      "issue": "notes → grading_notes rename is correctly handled. tasks with neither 'notes' nor 'grading_notes' get an empty string default.",
+      "suggestion": "No change needed."
+    }
+  ]
+}

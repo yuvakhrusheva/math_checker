@@ -1,0 +1,57 @@
+{
+  "reviewer": "infrastructure-reviewer",
+  "task": 1,
+  "round": 1,
+  "status": "needs_fixes",
+  "findings": [
+    {
+      "severity": "critical",
+      "file": ".gitignore",
+      "issue": "The 'logs/' pattern matches 'work/core-app/logs/' recursively, causing all review logs, audit reports, and task working files under work/core-app/logs/ to be git-ignored. These are project artifacts that should be tracked. Confirmed via: git check-ignore -v work/core-app/logs/ → .gitignore:42:logs/",
+      "recommendation": "Narrow the rule to only exclude runtime logs at the repo root. Replace 'logs/' with '/logs/' (anchored to root) or change to '*.log' only and remove the 'logs/' directory rule entirely, since the spec only requires *.log files to be ignored — not the work/ subdirectory tree."
+    },
+    {
+      "severity": "warning",
+      "file": "pytest.ini",
+      "issue": "Missing 'pythonpath = .' setting. Without it, pytest cannot resolve 'import app' or 'from src.db import init_db' unless the user manually sets PYTHONPATH=. before running pytest. The test file test_app_startup.py does 'import app' at the root level, which will fail if pytest is run from a directory where the repo root is not on sys.path.",
+      "recommendation": "Add 'pythonpath = .' under [pytest] in pytest.ini. This is the standard pytest>=7 way to add the project root to sys.path without requiring a conftest.py sys.path hack or a package install."
+    },
+    {
+      "severity": "warning",
+      "file": "tests/unit/",
+      "issue": "Missing .gitkeep in tests/unit/ and tests/integration/ — these directories have only __init__.py files (no .gitkeep). This is acceptable and intentional (the __init__.py makes them Python packages), but tests/fixtures/ has neither __init__.py nor .gitkeep — the directory is tracked only because tests/fixtures/llm_responses/.gitkeep exists. If llm_responses/.gitkeep is deleted, tests/fixtures/ itself could become untracked.",
+      "recommendation": "Add a .gitkeep to tests/fixtures/ directly (in addition to the one in llm_responses/) to ensure tests/fixtures/ remains tracked independently. Alternatively, add an __init__.py to tests/fixtures/ for consistency with sibling directories."
+    },
+    {
+      "severity": "warning",
+      "file": "app.py",
+      "issue": "validate_config() is called inside main() wrapped in try/except that calls st.error() + st.stop() instead of letting the ValueError propagate. This is correct for the Streamlit runtime path but means that when pytest imports app.py and calls validate_config() directly (as test_app_startup.py does), the tests correctly receive the ValueError. However, the 'if __name__ == \"__main__\" or \"streamlit\" in sys.modules' guard at line 71 means that importing app.py in tests will also execute main() if streamlit is already imported in the test session. This is fragile.",
+      "recommendation": "Change the entry-point guard to 'if __name__ == \"__main__\":' only, and rely on Streamlit's own mechanism to call main() when running via 'streamlit run'. Alternatively, add a module-level _is_streamlit_run() check. The current guard with 'streamlit in sys.modules' will execute main() any time app.py is imported during a test session that has already imported streamlit (e.g., via another test or fixture)."
+    },
+    {
+      "severity": "info",
+      "file": ".pre-commit-config.yaml",
+      "issue": "gitleaks is pinned to v8.18.4 — this is a specific version pin, which is correct. However, the hook only scans staged files (default gitleaks behavior). Non-staged but tracked files with secrets would not be caught. This is standard pre-commit behavior but worth noting for the security posture.",
+      "recommendation": "Acceptable as-is for pre-commit integration. For additional coverage, document in README or onboarding notes that a full repo scan ('gitleaks detect --source .') should be run periodically or as part of CI."
+    },
+    {
+      "severity": "info",
+      "file": "requirements.txt",
+      "issue": "pytest and pytest-mock are listed as runtime dependencies in requirements.txt rather than in a separate dev/test requirements file. This means production installs (if ever run in a non-dev context) would pull in test tooling unnecessarily.",
+      "recommendation": "For a local-only Streamlit tool this is a minor concern and acceptable. If the project ever moves toward a leaner deployment, consider splitting into requirements.txt (runtime) and requirements-dev.txt (test tools). No action required for Task 1."
+    },
+    {
+      "severity": "info",
+      "file": "config/settings.json",
+      "issue": "Model 'claude-3-5-sonnet-20241022' is a valid Anthropic model ID supported by LiteLLM. max_tokens=2048 and temperature=0 are correct for structured JSON extraction tasks. No issues.",
+      "recommendation": "No action needed."
+    },
+    {
+      "severity": "info",
+      "file": "README.md / Makefile",
+      "issue": "No Makefile or README section documenting how to install dependencies (pip install -r requirements.txt), set up .env, or install pre-commit hooks (pre-commit install). The task spec marks this as optional.",
+      "recommendation": "Optional: Add a 'Quick Start' section to README.md with the three setup commands: (1) pip install -r requirements.txt, (2) cp .env.example .env, (3) pre-commit install. Not blocking."
+    }
+  ],
+  "summary": "Infrastructure is largely correct (all required files and folders present, deps match spec, gitleaks pinned, .env.example comprehensive) but has two fixes required: the 'logs/' gitignore rule silently suppresses all work/core-app/logs/ tracking, and pytest.ini is missing 'pythonpath = .' which will cause import failures when running tests without manual PYTHONPATH setup."
+}

@@ -1,0 +1,171 @@
+{
+  "validator": "reality-checker",
+  "batch": 4,
+  "iteration": 1,
+  "tasks_checked": [10, 11, 12],
+  "status": "pass",
+  "findings": [
+    {
+      "task": 10,
+      "severity": "info",
+      "area": "pdf_to_images return type",
+      "issue": "Task description says pdf_processor.pdf_to_images(pdf_path) returns 'list of base64-encoded page images', and the UI layout shows indexing as pdf_to_images(pdf_path)[page_number-1]. The tech-spec (Task 5 description) defines the return as 'list of (page_number, base64_string) tuples'. These are inconsistent — if the return is a list of tuples, indexing [page_number-1] would yield a tuple, not a bare base64 string. The implementer must reconcile this. The code comment in the UI layout (`base64.b64decode(b64_string)`) implies they expect a bare string from the index, not a tuple.",
+      "recommendation": "Minor inconsistency — the Task 10 implementer should check src/pdf_processor.py (T5 output) and adjust indexing accordingly. If pdf_to_images returns tuples, extract the second element. No task file edit needed; this is implementation-level knowledge."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "PDF path security check",
+      "issue": null,
+      "recommendation": "Path traversal guard explicitly specified: resolve with os.path.realpath and verify within data/downloads/. Correct and complete."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "Null detected_variant handling",
+      "issue": null,
+      "recommendation": "Variant dropdown for detected_variant=null explicitly specified. Edge case covered: block task display until variant is selected — prevents showing tasks before criteria are known."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "Score recalculation without LLM re-call",
+      "issue": null,
+      "recommendation": "Explicitly stated: 'No LLM re-call.' scorer.compute_score() called with new answer and criteria. Correct per Decision 4 in tech-spec."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "Mark as Done updates review_status",
+      "issue": null,
+      "recommendation": "'Mark as Done' sets review_status='done' AND status='processed'. Both fields updated — correct per schema (review_status CHECK('pending','done'), status CHECK includes 'processed')."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "PDF path in data/downloads/{cohort_id}/",
+      "issue": null,
+      "recommendation": "Path format data/downloads/{cohort_id}/{filename} correctly stated. Matches tech-spec (Task 4 description: 'download PDFs to data/downloads/{cohort_id}/'). Filename sourced from students.filename column per schema."
+    },
+    {
+      "task": 10,
+      "severity": "pass",
+      "area": "depends_on correctness",
+      "issue": null,
+      "recommendation": "depends_on: [7, 8] is correct. T7 provides queue_processor (student data in DB), T8 provides Criteria Management UI (criteria loaded). src/db.py (T2), src/scorer.py (T6), src/pdf_processor.py (T5) are all transitively available by wave 5."
+    },
+    {
+      "task": 10,
+      "severity": "info",
+      "area": "Missing TDD anchor",
+      "issue": "T10 has no TDD Anchor section. It uses skill=code-writing which normally requires TDD anchors. Review Panel is a Streamlit UI page — unit testing Streamlit pages is non-standard and typically done via user verification. The verify field is set to [user] which is the correct approach. This is an acceptable deliberate choice but worth noting for the test-reviewer.",
+      "recommendation": "No action needed. User verification is the correct testing strategy for a pure Streamlit UI page with no testable pure-logic functions. The absence of TDD anchor is justified."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "ERROR marker for status=error students",
+      "issue": null,
+      "recommendation": "ERROR marker for status=error students explicitly specified across all task columns (both Answers and Scores sheets). Correct."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "PENDING for unreviewed students",
+      "issue": null,
+      "recommendation": "PENDING marker for review_status=pending explicitly specified. Matches CA-23."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "Unreadable students excluded",
+      "issue": null,
+      "recommendation": "status=unreadable students excluded (not ERROR-marked). Correct per CA-25. ERROR/PENDING are for other statuses. Distinction is clearly maintained."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "Grade 3 performance levels",
+      "issue": null,
+      "recommendation": "81–100 → Advanced, 61–80 → Basic, 31–60 → Minimal, 0–30 → Insufficient. Matches user-spec CA-22 exactly. TDD anchor test_grade3_performance_levels covers boundaries at 0, 30, 31, 60, 61, 80, 81, 100 — comprehensive."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "Grade 2 performance level blank",
+      "issue": null,
+      "recommendation": "Grade 2 performance_level left blank. Matches user-spec CA-22 (grade 2: TBD) and constraints section. Explicitly required to be blank string not None/NaN — good edge case noted."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "pages/export.py — no conflict with T9",
+      "issue": null,
+      "recommendation": "T11 creates pages/export.py. T9 creates pages/main.py. These are distinct files. app.py modified by both T9 and T11 (for st.navigation registration) — sequential execution in wave 5 is fine since T9 and T11 are both wave 5 and parallel, but app.py edits may need merging. This is a build concern, not a spec error."
+    },
+    {
+      "task": 11,
+      "severity": "info",
+      "area": "app.py parallel wave 5 edit conflict",
+      "issue": "T9 (wave 5, parallel) and T11 (wave 5, parallel) both list app.py as a file to modify for st.navigation registration. If executed in parallel by agents, they will conflict on app.py. This is a practical execution risk, not a spec error.",
+      "recommendation": "No spec change needed. The feature-execution orchestrator (do-feature skill) should serialize app.py edits or handle merge. Wave 5 agents should be aware of this shared file."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "TDD anchors present and adequate",
+      "issue": null,
+      "recommendation": "10 TDD anchor tests specified with exact test::method names. Covers all acceptance criteria including boundary cases, sort order, PENDING/ERROR markers, excluded students, filename format. Adequate coverage."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "ERROR takes precedence over PENDING edge case",
+      "issue": null,
+      "recommendation": "Explicitly called out: 'Student with status=error AND review_status=pending — ERROR takes precedence.' Correct design decision, prevents ambiguous rows."
+    },
+    {
+      "task": 11,
+      "severity": "pass",
+      "area": "total_score for ERROR/PENDING rows",
+      "issue": null,
+      "recommendation": "total_score must be blank/NaN for ERROR and PENDING rows, not 0. Explicitly stated. Correct — avoids misleading zeros in the exported file."
+    },
+    {
+      "task": 12,
+      "severity": "pass",
+      "area": "Audit task — no TDD anchor, no code written",
+      "issue": null,
+      "recommendation": "T12 uses skill=code-reviewing, reviewers=[], verify=[]. No TDD Anchor section. Verification Steps explicitly states 'N/A — this is an audit task. No code written, no tests.' Correct pattern for an audit task."
+    },
+    {
+      "task": 12,
+      "severity": "pass",
+      "area": "depends_on correctness",
+      "issue": null,
+      "recommendation": "depends_on: [9, 10, 11] — T12 waits for all wave 5 UI tasks to complete before auditing. This ensures all src/ and pages/ files exist. Correct."
+    },
+    {
+      "task": 12,
+      "severity": "pass",
+      "area": "Audit scope completeness",
+      "issue": null,
+      "recommendation": "Audit checklist covers: cross-module consistency, error handling (UnreadablePDFError, JSONDecodeError, Drive failures), thread safety (queue_processor shared state), SQLite WAL/parameterized queries, dead code, function/class design, criteria JSON loading strategy. Comprehensive scope for the feature size."
+    },
+    {
+      "task": 12,
+      "severity": "info",
+      "area": "Mixed language in post-completion section",
+      "issue": "T12 post-completion checklist is written in Russian ('Записать краткий отчёт в decisions.md по шаблону...') while T10 and T11 use English for the same section. Minor inconsistency — does not affect execution.",
+      "recommendation": "No action needed. Cosmetic inconsistency only."
+    },
+    {
+      "task": 12,
+      "severity": "info",
+      "area": "Criteria JSON loading audit item",
+      "issue": "T12 asks to check whether criteria JSON is 'loaded fresh each time or cached (should be fresh to pick up new uploads)'. This is a valid audit concern. However, Decision 3 in tech-spec says criteria are loaded at runtime dynamically — the audit should confirm the implementation matches this intent. No contradiction, but the auditor should be aware of the expected behavior.",
+      "recommendation": "No action needed. The audit item correctly probes the implementation against a known architectural decision."
+    }
+  ],
+  "summary": "All three tasks pass reality check. T10 is well-specified: correct API calls, path security guard present, null variant handling covered, score recalculation without LLM re-call explicit, Mark as Done updates both review_status and status. One minor implementation-level note: pdf_to_images return type (list-of-tuples vs list-of-strings) is described slightly differently in T10 vs T5 — the T10 implementer should verify against the actual T5 output. T11 is well-specified with comprehensive TDD anchors (10 tests), correct PENDING/ERROR/excluded logic, correct grade 2/3 performance levels, and good edge cases documented. One practical risk: T9 and T11 both modify app.py in the same wave — feature orchestrator should handle this merge. T12 is correctly structured as a no-code audit task: no TDD anchor, no reviewers, verification N/A. Minor: post-completion section in T12 is in Russian while T10/T11 use English. No blocking issues found; all tasks are ready for execution."
+}

@@ -1,0 +1,26 @@
+{
+  "task": "Task 7: Queue processor with background threading",
+  "reviewer": "test-reviewer",
+  "round": 1,
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "info",
+      "location": "tests/integration/test_queue_processor.py",
+      "issue": "All 5 TDD anchors present. sanitize_error_message has 6 unit-style tests (no DB needed). Resumability and stop tests use mocked Drive/LLM. Full pipeline test skips when credentials absent.",
+      "suggestion": "No changes required."
+    },
+    {
+      "severity": "warning",
+      "location": "tests/integration/test_queue_processor.py::TestResumability",
+      "issue": "The test patches criteria_loader.load_criteria but doesn't verify that db.update_student_recognized_name was called (to verify the recognized name is saved). Minor — overall pipeline correctness is tested.",
+      "suggestion": "Optional: add assertion that recognized_name is populated in DB for processed students."
+    },
+    {
+      "severity": "info",
+      "location": "tests/integration/test_queue_processor.py",
+      "issue": "Missing test for UnreadablePDFError path (student set to unreadable status). This is a key error path.",
+      "suggestion": "Add: mock pdf_to_images to raise UnreadablePDFError, verify student status becomes 'unreadable'."
+    }
+  ]
+}

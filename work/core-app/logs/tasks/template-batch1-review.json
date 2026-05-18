@@ -1,0 +1,21 @@
+{
+  "validator": "task-validator",
+  "batch": 1,
+  "iteration": 1,
+  "status": "pass",
+  "findings": [
+    {
+      "task": 1,
+      "severity": "info",
+      "issue": "Task 1 uses skill=infrastructure-setup (not code-writing) but includes a TDD Anchor section. This is correct and intentional — app.py contains testable validation logic — but reviewers should be aware the TDD anchor applies to a code-writing sub-concern within an infra task.",
+      "recommendation": "No action needed. TDD Anchor is appropriate here and tests are correctly specified."
+    },
+    {
+      "task": 3,
+      "severity": "info",
+      "issue": "Tech-spec 'Files to modify' for Task 3 lists criteria JSON files (grade2_ru_v1.json, grade2_ru_v2.json, grade3_ru_v1.json, grade3_ru_v2.json), but the task file explicitly clarifies these are created by the operator via the Criteria Management UI — not by this task. This is an intentional scope narrowing, not an error.",
+      "recommendation": "No action needed. The task description correctly explains the divergence from the tech-spec file list."
+    }
+  ],
+  "summary": "All 5 tasks pass template compliance: frontmatter complete, all required sections present, wave/depends_on correct, verify fields correct, reviewers correct, TDD anchors present for all code-writing tasks with specific test::method names, AC coverage matches tech-spec task descriptions. 2 info-level observations logged, no warnings or critical issues."
+}
