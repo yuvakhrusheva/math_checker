@@ -1,87 +1,236 @@
-"""SQLite database layer for math_checker."""
+"""SQLAlchemy-based database layer for math_checker.
+
+Поддерживает два бэкенда:
+- SQLite (по умолчанию, для локальной разработки)
+- PostgreSQL (для продакшена)
+
+Выбирается через переменную окружения DATABASE_URL. Если не задана —
+используется sqlite:///<DB_PATH> (старое поведение).
+
+Интерфейс функций (имена, аргументы, возвращаемые значения) сохранён.
+SELECT-функции возвращают sqlalchemy.RowMapping — словарь-подобный объект,
+который поддерживает row["col"], row.col, row[0]. Это совместимо со старым
+sqlite3.Row, поэтому вызывающий код (queue_processor, pages, тесты) не правится.
+
+Также экспортируется backward-compat функция get_connection() — возвращает
+DBAPI-соединение с row_factory=sqlite3.Row. Нужна для кода, который выполняет
+raw SQL (например, exporter.py с большим JOIN-запросом).
+"""
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = "data/math_checker.db"
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS cohorts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    gdrive_folder_url TEXT NOT NULL,
-    gdrive_folder_id TEXT NOT NULL,
-    school TEXT NOT NULL,
-    teacher TEXT NOT NULL,
-    class_number INTEGER NOT NULL,
-    class_letter TEXT NOT NULL,
-    in_project INTEGER NOT NULL DEFAULT 1,
-    language TEXT NOT NULL CHECK(language IN ('ru', 'az')),
-    test_date TEXT NOT NULL,
-    grade INTEGER NOT NULL CHECK(grade IN (2, 3)),
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending', 'processing', 'done', 'done_with_errors'))
-);
-
-CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cohort_id INTEGER NOT NULL REFERENCES cohorts(id),
-    gdrive_file_id TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    recognized_name TEXT,
-    detected_variant INTEGER,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending', 'processing', 'processed',
-                         'requires_review', 'unreadable', 'error')),
-    review_status TEXT CHECK(review_status IN ('pending', 'done')),
-    error_message TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS task_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id INTEGER NOT NULL REFERENCES students(id),
-    task_number INTEGER NOT NULL,
-    page_number INTEGER NOT NULL,
-    recognized_answer TEXT,
-    score REAL NOT NULL DEFAULT 0,
-    max_score REAL NOT NULL,
-    confidence TEXT NOT NULL CHECK(confidence IN ('low', 'high')),
-    grading_notes TEXT,
-    manually_corrected INTEGER NOT NULL DEFAULT 0,
-    bbox TEXT,
-    UNIQUE(student_id, task_number)
-);
-"""
+from sqlalchemy import (
+    MetaData, Table, Column, Integer, String, Float, ForeignKey,
+    CheckConstraint, UniqueConstraint,
+    create_engine, insert, select, update, text,
+)
 
 
-def get_connection() -> sqlite3.Connection:
-    """Open DB connection with WAL mode and dict-like row access."""
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+DB_PATH: str = "data/math_checker.db"
 
 
-def _ensure_bbox_column(conn: sqlite3.Connection) -> None:
-    """Idempotent migration: add bbox column to task_results if it's missing.
+def _resolve_database_url() -> str:
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if url:
+        return url
+    abs_path = os.path.abspath(DB_PATH)
+    return f"sqlite:///{abs_path}"
 
-    CREATE TABLE IF NOT EXISTS не добавляет колонки в существующие таблицы —
-    делаем это явно через ALTER TABLE для БД, созданных до того, как поле
-    bbox появилось в _SCHEMA.
+
+_engine_cache: dict = {}
+
+
+def get_engine():
+    url = _resolve_database_url()
+    if url not in _engine_cache:
+        engine = create_engine(url, future=True)
+        if url.startswith("sqlite"):
+            with engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.commit()
+        _engine_cache[url] = engine
+    return _engine_cache[url]
+
+
+def reset_engine_cache() -> None:
+    for engine in _engine_cache.values():
+        engine.dispose()
+    _engine_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat: get_connection
+# ---------------------------------------------------------------------------
+
+class _ConnectionShim:
+    """Тонкая обёртка над sqlite3.Connection / psycopg2.connection для совместимости.
+
+    Старый код делает:
+        with db.get_connection() as conn:
+            rows = conn.execute("SELECT ...").fetchall()
+            row["col_name"]
+
+    Этот shim обеспечивает работу того же паттерна и для SQLite, и для Postgres.
+    Для SQLite — устанавливает row_factory=sqlite3.Row, чтобы row["col_name"]
+    работал. Для Postgres — оборачивает курсор в DictCursor-like.
     """
-    cols = conn.execute("PRAGMA table_info(task_results)").fetchall()
-    col_names = {row["name"] for row in cols}
-    if "bbox" not in col_names:
-        conn.execute("ALTER TABLE task_results ADD COLUMN bbox TEXT")
+
+    def __init__(self, engine):
+        self._engine = engine
+        self._raw = None
+
+    def __enter__(self):
+        self._raw = self._engine.raw_connection()
+        if self._engine.dialect.name == "sqlite":
+            # raw — это объект из sqlalchemy.pool, обернувший sqlite3.Connection.
+            # Реальное соединение — .driver_connection (или .connection).
+            real = getattr(self._raw, "driver_connection", None) or self._raw.connection
+            real.row_factory = sqlite3.Row
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if exc_type is None:
+                self._raw.commit()
+            else:
+                self._raw.rollback()
+        finally:
+            self._raw.close()
+        return False
+
+    def execute(self, sql, params=()):
+        cursor = self._raw.cursor()
+        cursor.execute(sql, params)
+        return cursor
+
+    def commit(self):
+        self._raw.commit()
+
+    def rollback(self):
+        self._raw.rollback()
+
+
+def get_connection():
+    """Backward-compat: вернуть DBAPI-соединение, где row["col_name"] работает.
+
+    Использовать для raw-SQL кода (см. exporter.py). Для типичных CRUD-операций
+    предпочитайте функции этого модуля (они уже возвращают RowMapping).
+    """
+    return _ConnectionShim(get_engine())
+
+
+# ---------------------------------------------------------------------------
+# Schema (SQLAlchemy Core MetaData)
+# ---------------------------------------------------------------------------
+
+metadata = MetaData()
+
+cohorts = Table(
+    "cohorts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
+    Column("gdrive_folder_url", String, nullable=False),
+    Column("gdrive_folder_id", String, nullable=False),
+    Column("school", String, nullable=False),
+    Column("teacher", String, nullable=False),
+    Column("class_number", Integer, nullable=False),
+    Column("class_letter", String, nullable=False),
+    Column("in_project", Integer, nullable=False, server_default="1"),
+    Column("language", String, nullable=False),
+    Column("test_date", String, nullable=False),
+    Column("grade", Integer, nullable=False),
+    Column("status", String, nullable=False, server_default="pending"),
+    CheckConstraint("language IN ('ru', 'az')", name="ck_cohorts_language"),
+    CheckConstraint("grade IN (2, 3)", name="ck_cohorts_grade"),
+    CheckConstraint(
+        "status IN ('pending', 'processing', 'done', 'done_with_errors')",
+        name="ck_cohorts_status",
+    ),
+)
+
+students_t = Table(
+    "students", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("cohort_id", Integer, ForeignKey("cohorts.id"), nullable=False),
+    Column("gdrive_file_id", String, nullable=False),
+    Column("filename", String, nullable=False),
+    Column("recognized_name", String),
+    Column("detected_variant", Integer),
+    Column("status", String, nullable=False, server_default="pending"),
+    Column("review_status", String),
+    Column("error_message", String),
+    Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
+    CheckConstraint(
+        "status IN ('pending', 'processing', 'processed', "
+        "'requires_review', 'unreadable', 'error')",
+        name="ck_students_status",
+    ),
+    CheckConstraint(
+        "review_status IS NULL OR review_status IN ('pending', 'done')",
+        name="ck_students_review",
+    ),
+)
+
+task_results = Table(
+    "task_results", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("student_id", Integer, ForeignKey("students.id"), nullable=False),
+    Column("task_number", Integer, nullable=False),
+    Column("page_number", Integer, nullable=False),
+    Column("recognized_answer", String),
+    Column("score", Float, nullable=False, server_default="0"),
+    Column("max_score", Float, nullable=False),
+    Column("confidence", String, nullable=False),
+    Column("grading_notes", String),
+    Column("manually_corrected", Integer, nullable=False, server_default="0"),
+    Column("bbox", String),
+    UniqueConstraint("student_id", "task_number", name="uq_task_results_student_task"),
+    CheckConstraint("confidence IN ('low', 'high')", name="ck_task_results_confidence"),
+)
+
+
+# ---------------------------------------------------------------------------
+# DB init + migrations
+# ---------------------------------------------------------------------------
+
+def _ensure_bbox_column(engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(task_results)")).fetchall()
+        col_names = {row[1] for row in cols}
+        if "bbox" not in col_names:
+            conn.execute(text("ALTER TABLE task_results ADD COLUMN bbox TEXT"))
+            conn.commit()
 
 
 def init_db() -> None:
-    """Create all tables (idempotent). Safe to call multiple times."""
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with get_connection() as conn:
-        conn.executescript(_SCHEMA)
-        _ensure_bbox_column(conn)
+    engine = get_engine()
+    if engine.url.drivername.startswith("sqlite") and engine.url.database:
+        Path(engine.url.database).parent.mkdir(parents=True, exist_ok=True)
+    metadata.create_all(engine)
+    _ensure_bbox_column(engine)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _dialect_insert(table_):
+    engine = get_engine()
+    if engine.dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    elif engine.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        raise NotImplementedError(f"Upsert не реализован для {engine.dialect.name}")
+    return dialect_insert(table_)
 
 
 # ---------------------------------------------------------------------------
@@ -100,47 +249,55 @@ def create_cohort(
     grade: int,
     in_project: int = 1,
 ) -> int:
-    with get_connection() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO cohorts
-                (gdrive_folder_url, gdrive_folder_id, school, teacher,
-                 class_number, class_letter, language, test_date, grade, in_project)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (gdrive_folder_url, gdrive_folder_id, school, teacher,
-             class_number, class_letter, language, test_date, grade, in_project),
-        )
-        return cur.lastrowid
+    stmt = insert(cohorts).values(
+        gdrive_folder_url=gdrive_folder_url,
+        gdrive_folder_id=gdrive_folder_id,
+        school=school, teacher=teacher,
+        class_number=class_number, class_letter=class_letter,
+        language=language, test_date=test_date,
+        grade=grade, in_project=in_project,
+    )
+    with get_engine().begin() as conn:
+        result = conn.execute(stmt)
+        return result.inserted_primary_key[0]
 
 
 def get_cohort(cohort_id: int):
-    with get_connection() as conn:
-        return conn.execute("SELECT * FROM cohorts WHERE id = ?", (cohort_id,)).fetchone()
+    with get_engine().connect() as conn:
+        return conn.execute(
+            select(cohorts).where(cohorts.c.id == cohort_id)
+        ).mappings().first()
 
 
 def list_cohorts() -> list:
-    with get_connection() as conn:
-        return conn.execute("SELECT * FROM cohorts ORDER BY created_at DESC").fetchall()
+    with get_engine().connect() as conn:
+        return conn.execute(
+            select(cohorts).order_by(cohorts.c.created_at.desc())
+        ).mappings().all()
 
 
 def get_next_pending_cohort():
-    """Return the oldest cohort with status='pending', or None if there are none."""
-    with get_connection() as conn:
+    with get_engine().connect() as conn:
         return conn.execute(
-            "SELECT * FROM cohorts WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
-        ).fetchone()
+            select(cohorts)
+            .where(cohorts.c.status == "pending")
+            .order_by(cohorts.c.created_at.asc())
+            .limit(1)
+        ).mappings().first()
 
 
 def update_cohort_status(cohort_id: int, status: str) -> None:
-    with get_connection() as conn:
-        conn.execute("UPDATE cohorts SET status = ? WHERE id = ?", (status, cohort_id))
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(cohorts).where(cohorts.c.id == cohort_id).values(status=status)
+        )
 
 
 def update_cohort_metadata(cohort_id: int, **fields) -> None:
-    """Update editable metadata fields. Raises ValueError if cohort is not pending."""
-    with get_connection() as conn:
-        row = conn.execute("SELECT status FROM cohorts WHERE id = ?", (cohort_id,)).fetchone()
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            select(cohorts.c.status).where(cohorts.c.id == cohort_id)
+        ).mappings().first()
         if row is None:
             raise ValueError(f"Cohort {cohort_id} not found")
         if row["status"] != "pending":
@@ -154,10 +311,8 @@ def update_cohort_metadata(cohort_id: int, **fields) -> None:
         invalid = set(fields) - allowed
         if invalid:
             raise ValueError(f"Unknown cohort fields: {invalid}")
-        set_clause = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(
-            f"UPDATE cohorts SET {set_clause} WHERE id = ?",  # noqa: S608 — field names validated above
-            (*fields.values(), cohort_id),
+            update(cohorts).where(cohorts.c.id == cohort_id).values(**fields)
         )
 
 
@@ -166,72 +321,80 @@ def update_cohort_metadata(cohort_id: int, **fields) -> None:
 # ---------------------------------------------------------------------------
 
 def create_student(cohort_id: int, gdrive_file_id: str, filename: str) -> int:
-    with get_connection() as conn:
-        cur = conn.execute(
-            "INSERT INTO students (cohort_id, gdrive_file_id, filename) VALUES (?, ?, ?)",
-            (cohort_id, gdrive_file_id, filename),
-        )
-        return cur.lastrowid
+    stmt = insert(students_t).values(
+        cohort_id=cohort_id, gdrive_file_id=gdrive_file_id, filename=filename,
+    )
+    with get_engine().begin() as conn:
+        return conn.execute(stmt).inserted_primary_key[0]
 
 
 def get_student(student_id: int):
-    with get_connection() as conn:
-        return conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+    with get_engine().connect() as conn:
+        return conn.execute(
+            select(students_t).where(students_t.c.id == student_id)
+        ).mappings().first()
 
 
 def list_students_by_cohort(cohort_id: int) -> list:
-    with get_connection() as conn:
+    with get_engine().connect() as conn:
         return conn.execute(
-            "SELECT * FROM students WHERE cohort_id = ? ORDER BY filename", (cohort_id,)
-        ).fetchall()
+            select(students_t)
+            .where(students_t.c.cohort_id == cohort_id)
+            .order_by(students_t.c.filename)
+        ).mappings().all()
 
 
 def update_student_status(student_id: int, status: str, error_message: str | None = None) -> None:
-    with get_connection() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
-            "UPDATE students SET status = ?, error_message = ? WHERE id = ?",
-            (status, error_message, student_id),
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(status=status, error_message=error_message)
         )
 
 
 def update_student_variant(student_id: int, detected_variant: int) -> None:
-    with get_connection() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
-            "UPDATE students SET detected_variant = ? WHERE id = ?",
-            (detected_variant, student_id),
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(detected_variant=detected_variant)
         )
 
 
 def update_student_recognized_name(student_id: int, name: str) -> None:
-    with get_connection() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
-            "UPDATE students SET recognized_name = ? WHERE id = ?",
-            (name, student_id),
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(recognized_name=name)
         )
 
 
 def list_requires_review() -> list:
-    with get_connection() as conn:
+    with get_engine().connect() as conn:
         return conn.execute(
-            "SELECT * FROM students WHERE status = 'requires_review' ORDER BY cohort_id, filename"
-        ).fetchall()
+            select(students_t)
+            .where(students_t.c.status == "requires_review")
+            .order_by(students_t.c.cohort_id, students_t.c.filename)
+        ).mappings().all()
 
 
 def set_review_pending(student_id: int) -> None:
-    """Set review_status='pending' (called when student is marked requires_review)."""
-    with get_connection() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
-            "UPDATE students SET review_status = 'pending' WHERE id = ?",
-            (student_id,),
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(review_status="pending")
         )
 
 
 def mark_student_reviewed(student_id: int) -> None:
-    """Mark student as done with review: status='processed', review_status='done'."""
-    with get_connection() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
-            "UPDATE students SET status = 'processed', review_status = 'done' WHERE id = ?",
-            (student_id,),
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(status="processed", review_status="done")
         )
 
 
@@ -250,45 +413,50 @@ def save_task_result(
     grading_notes: str | None = None,
     bbox: str | None = None,
 ) -> None:
-    """Сохранить результат проверки одной задачи.
-
-    Args:
-        bbox: опционально, JSON-строка вида '{"x1":0.05,"y1":0.2,"x2":0.95,"y2":0.4}'
-              с нормализованными координатами от 0 до 1. None — bbox неизвестен,
-              Review Panel покажет страницу целиком (старое поведение).
-    """
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO task_results
-                (student_id, task_number, page_number, recognized_answer,
-                 score, max_score, confidence, grading_notes, bbox)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (student_id, task_number, page_number, recognized_answer,
-             score, max_score, confidence, grading_notes, bbox),
-        )
+    stmt = _dialect_insert(task_results).values(
+        student_id=student_id, task_number=task_number,
+        page_number=page_number, recognized_answer=recognized_answer,
+        score=score, max_score=max_score, confidence=confidence,
+        grading_notes=grading_notes, bbox=bbox,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["student_id", "task_number"],
+        set_=dict(
+            page_number=stmt.excluded.page_number,
+            recognized_answer=stmt.excluded.recognized_answer,
+            score=stmt.excluded.score,
+            max_score=stmt.excluded.max_score,
+            confidence=stmt.excluded.confidence,
+            grading_notes=stmt.excluded.grading_notes,
+            bbox=stmt.excluded.bbox,
+        ),
+    )
+    with get_engine().begin() as conn:
+        conn.execute(stmt)
 
 
 def get_task_results(student_id: int) -> list:
-    with get_connection() as conn:
+    with get_engine().connect() as conn:
         return conn.execute(
-            "SELECT * FROM task_results WHERE student_id = ? ORDER BY task_number",
-            (student_id,),
-        ).fetchall()
+            select(task_results)
+            .where(task_results.c.student_id == student_id)
+            .order_by(task_results.c.task_number)
+        ).mappings().all()
 
 
-def update_task_result(result_id: int, recognized_answer: str, score: float, manually_corrected: bool = True) -> None:
-    """Обновить распознанный ответ и балл (например, из Review Panel).
-
-    bbox не трогается — он остаётся таким, каким его установил grader.
-    """
-    with get_connection() as conn:
+def update_task_result(
+    result_id: int,
+    recognized_answer: str,
+    score: float,
+    manually_corrected: bool = True,
+) -> None:
+    with get_engine().begin() as conn:
         conn.execute(
-            """
-            UPDATE task_results
-            SET recognized_answer = ?, score = ?, manually_corrected = ?
-            WHERE id = ?
-            """,
-            (recognized_answer, score, int(manually_corrected), result_id),
+            update(task_results)
+            .where(task_results.c.id == result_id)
+            .values(
+                recognized_answer=recognized_answer,
+                score=score,
+                manually_corrected=int(manually_corrected),
+            )
         )
