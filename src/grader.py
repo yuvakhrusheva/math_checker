@@ -1,15 +1,15 @@
-"""LLM grader for math_checker — двухпроходная архитектура + bbox.
+"""LLM grader for math_checker — двухпроходная архитектура (v4).
 
-Этот файл — обновлённая версия предыдущего фикса (двухпроходного grader/scorer).
-Дополнительно: LLM теперь возвращает bbox каждого задания на странице,
-чтобы Review Panel мог показать обрезанный кусок страницы, а не всю.
+Что изменилось по сравнению с v3 (fixes4):
+- Визуальные задачи (correct_answers=[] и только full+zero) ПРИНУДИТЕЛЬНО
+  получают confidence="low" после Pass 2. Это нужно, чтобы такие задачи
+  гарантированно попадали в Review Panel — куратор должен вручную
+  перепроверить vision-оценку, как бы уверенно ни выглядел Pass 1.
+- В grading_notes для визуальных задач добавляется префикс
+  "[VISUAL — MANUAL REVIEW]", чтобы в Excel/Review Panel это сразу
+  бросалось в глаза.
 
-Bbox — это нормализованные координаты от 0 до 1:
-{ "x1": 0.05, "y1": 0.20, "x2": 0.95, "y2": 0.40 }
-где (0,0) — верхний левый угол страницы, (1,1) — правый нижний.
-
-Если LLM не смог определить координаты — возвращает null, и Review Panel
-покажет всю страницу как раньше (старое поведение, fallback).
+Поведение для НЕвизуальных задач не изменилось.
 """
 import json
 import re
@@ -19,7 +19,9 @@ import litellm
 
 from src.scorer import compute_score
 
+# Claude и некоторые другие модели иногда оборачивают JSON в markdown-фенсы.
 _FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
 _SETTINGS_PATH = Path(__file__).parent.parent / "config" / "settings.json"
 
 
@@ -43,28 +45,19 @@ _SYSTEM_PROMPT = (
     "\"page_number\": integer, "
     "\"recognized_answer\": string, "
     "\"confidence\": \"low\"|\"high\", "
-    "\"notes\": string, "
-    "\"bbox\": {\"x1\": float, \"y1\": float, \"x2\": float, \"y2\": float}|null "
+    "\"notes\": string "
     "} ] }. "
     "CRITICAL: recognized_answer MUST be exactly what is written on the paper, "
     "even if it looks wrong or unusual. Never guess, never substitute a more "
     "plausible answer. If you cannot read the answer reliably, set "
     "recognized_answer to \"\" and confidence to \"low\". "
-    "BBOX: For each task, also return a 'bbox' field with NORMALIZED coordinates "
-    "of the rectangle that contains the entire task on the page — both the question "
-    "text/image AND the student's answer area. Values are decimals between 0 and 1 "
-    "where (0,0) is the top-left corner of the page and (1,1) is the bottom-right. "
-    "Give a generous bbox that includes a little padding around the task. "
-    "If you cannot reliably determine the bbox, return null for that task's bbox."
+    "For visual tasks (e.g. \"mark the picture\"), describe which option the "
+    "student marked (e.g. \"first picture marked with a tick\", \"second box "
+    "ticked\") — the page image will be re-shown to a separate scorer."
 )
 
 
 def build_prompt(criteria: dict, pages: list[tuple[int, str]]) -> str:
-    """Build text portion of the recognition prompt.
-
-    НЕ включает correct_answers и tier conditions — оценивание делается отдельно
-    в scorer.py, чтобы LLM не мог "подсмотреть" правильный ответ при распознавании.
-    """
     lines = [
         f"Grade: {criteria.get('grade')}  Language: {criteria.get('language')}  "
         f"Variant: {criteria.get('variant')}",
@@ -89,10 +82,6 @@ def build_prompt(criteria: dict, pages: list[tuple[int, str]]) -> str:
 
 
 def _parse_llm_response(raw: str) -> dict:
-    """Parse raw LLM text. Renames 'notes' → 'grading_notes'.
-
-    Поле bbox оставляем как есть — его обработает grade_student.
-    """
     text = (raw or "").strip()
     m = _FENCE_RE.match(text)
     if m:
@@ -108,42 +97,30 @@ def _parse_llm_response(raw: str) -> dict:
     return data
 
 
-def _normalize_bbox(bbox) -> str | None:
-    """Превратить bbox dict в JSON-строку для хранения в БД.
-
-    Возвращает None, если bbox отсутствует, неверного формата, или координаты
-    выходят за пределы [0,1].
-    """
-    if not isinstance(bbox, dict):
-        return None
-    try:
-        x1 = float(bbox["x1"])
-        y1 = float(bbox["y1"])
-        x2 = float(bbox["x2"])
-        y2 = float(bbox["y2"])
-    except (KeyError, TypeError, ValueError):
-        return None
-
-    # Зажимаем в [0, 1] и проверяем, что x1<x2, y1<y2
-    x1, x2 = max(0.0, min(x1, x2)), min(1.0, max(x1, x2))
-    y1, y2 = max(0.0, min(y1, y2)), min(1.0, max(y1, y2))
-    if x2 - x1 < 0.01 or y2 - y1 < 0.01:
-        # Слишком маленький bbox — игнорируем
-        return None
-
-    return json.dumps({"x1": x1, "y1": y1, "x2": x2, "y2": y2}, ensure_ascii=False)
+def _is_visual_task(task_criteria: dict) -> bool:
+    """Визуальная задача: пустой correct_answers и нет partial-тиров."""
+    if task_criteria.get("correct_answers"):
+        return False
+    partial = [
+        t for t in task_criteria.get("tiers", [])
+        if t.get("label") not in ("full", "zero")
+    ]
+    return not partial
 
 
 def grade_student(
     pages: list[tuple[int, str]],
     criteria: dict,
 ) -> dict:
-    """Call vision LLM to extract answers + bbox, then locally score each task."""
+    """Call vision LLM to extract answers, then locally score each task via scorer."""
     settings = _SETTINGS
     prompt_text = build_prompt(criteria, pages)
 
     image_blocks = [
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        }
         for _, b64 in pages
     ]
 
@@ -168,23 +145,35 @@ def grade_student(
     raw = response.choices[0].message.content
     data = _parse_llm_response(raw)
 
-    # ВТОРОЙ ПРОХОД: каждой задаче проставляем score через scorer
-    # + нормализуем bbox в JSON-строку для БД.
+    # ВТОРОЙ ПРОХОД
     tasks_criteria = {t["task_number"]: t for t in criteria.get("tasks", [])}
+    pages_by_num = {pn: b64 for pn, b64 in pages}
+
     for task in data.get("tasks", []):
         task_num = task.get("task_number")
         task_criteria = tasks_criteria.get(task_num, {})
         recognized = task.get("recognized_answer", "")
-        score, scoring_notes = compute_score(recognized, task_criteria)
+
+        visual = _is_visual_task(task_criteria)
+        page_b64 = pages_by_num.get(task.get("page_number")) if visual else None
+
+        score, scoring_notes = compute_score(
+            recognized, task_criteria, page_image_b64=page_b64
+        )
         task["score"] = score
         task["max_score"] = float(task_criteria.get("max_score", 0))
+
+        # Склейка grading_notes
         existing = task.get("grading_notes", "")
         if existing and scoring_notes:
             task["grading_notes"] = f"{existing} | {scoring_notes}"
         elif scoring_notes:
             task["grading_notes"] = scoring_notes
 
-        # bbox: dict из ответа → JSON-строка для БД (или None)
-        task["bbox"] = _normalize_bbox(task.get("bbox"))
+        # Для визуальных задач — принудительно low confidence и заметный префикс,
+        # чтобы куратор обязательно их перепроверил в Review Panel.
+        if visual:
+            task["confidence"] = "low"
+            task["grading_notes"] = f"[VISUAL — MANUAL REVIEW] {task['grading_notes']}"
 
     return data

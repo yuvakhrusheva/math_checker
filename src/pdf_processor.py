@@ -1,4 +1,16 @@
-"""PDF → JPEG page images for math_checker grading pipeline."""
+"""PDF → JPEG page images for math_checker grading pipeline.
+
+Изменения (Вариант А — автодетекция ориентации):
+- Если страница отрендерилась в landscape (ширина заметно больше высоты),
+  поворачиваем её на 90° по часовой при рендере. Покрывает случай, когда
+  скан повёрнут на 90/270 — пользователь больше не видит «лежащих»
+  страниц в Review Panel и Pass 1 LLM получает корректно ориентированный
+  скан, что повышает точность распознавания.
+- НЕ покрывает случай поворота ровно на 180° (для этого нужна отдельная
+  логика, например детекция «верха» через OCR-плотность сверху/снизу).
+- Порог соотношения сторон — `_LANDSCAPE_RATIO` (1.2). Если рабочие сканы
+  в портрете близки к квадратным, можно поднять порог.
+"""
 import base64
 from pathlib import Path
 
@@ -9,7 +21,21 @@ class UnreadablePDFError(Exception):
     """Raised when a PDF cannot be opened or rendered."""
 
 
-_DPI_MATRIX = fitz.Matrix(150 / 72, 150 / 72)
+_DPI = 150
+_DPI_SCALE = _DPI / 72  # PyMuPDF works in 72-dpi units by default
+_LANDSCAPE_RATIO = 1.2   # ширина / высота > этого → считаем landscape и крутим
+
+
+def _build_render_matrix(page: fitz.Page) -> fitz.Matrix:
+    """Return rendering matrix; rotates landscape pages 90° clockwise."""
+    rect = page.rect
+    width, height = rect.width, rect.height
+
+    mat = fitz.Matrix(_DPI_SCALE, _DPI_SCALE)
+    if height > 0 and width / height > _LANDSCAPE_RATIO:
+        # landscape → rotate 90° CW so the result becomes portrait
+        mat = mat.prerotate(90)
+    return mat
 
 
 def pdf_to_images(pdf_path: str | Path) -> list[tuple[int, str]]:
@@ -37,7 +63,8 @@ def pdf_to_images(pdf_path: str | Path) -> list[tuple[int, str]]:
         for page_idx in range(doc.page_count):
             try:
                 page = doc.load_page(page_idx)
-                pix = page.get_pixmap(matrix=_DPI_MATRIX)
+                matrix = _build_render_matrix(page)
+                pix = page.get_pixmap(matrix=matrix)
                 jpeg_bytes = pix.tobytes("jpeg")
             except Exception as exc:
                 raise UnreadablePDFError(
