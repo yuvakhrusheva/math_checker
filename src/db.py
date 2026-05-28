@@ -48,6 +48,12 @@ _engine_cache: dict = {}
 def get_engine():
     url = _resolve_database_url()
     if url not in _engine_cache:
+        # Для SQLite — заранее создаём папку, в которой будет лежать .db файл.
+        # SQLite не умеет создавать БД в несуществующей директории.
+        if url.startswith("sqlite:///"):
+            db_file = url.replace("sqlite:///", "", 1)
+            if db_file and db_file != ":memory:":
+                Path(db_file).parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(url, future=True)
         if url.startswith("sqlite"):
             with engine.connect() as conn:
@@ -277,10 +283,17 @@ def list_cohorts() -> list:
 
 
 def get_next_pending_cohort():
+    """Return the oldest pending cohort that is still in the project.
+
+    Soft-deleted cohorts (in_project=0) are EXCLUDED — кнопка 🗑️ в Cohort
+    Queue ставит in_project=0, и без этого фильтра обработчик всё равно
+    бы их обрабатывал.
+    """
     with get_engine().connect() as conn:
         return conn.execute(
             select(cohorts)
             .where(cohorts.c.status == "pending")
+            .where(cohorts.c.in_project == 1)
             .order_by(cohorts.c.created_at.asc())
             .limit(1)
         ).mappings().first()
@@ -396,6 +409,104 @@ def mark_student_reviewed(student_id: int) -> None:
             .where(students_t.c.id == student_id)
             .values(status="processed", review_status="done")
         )
+
+
+def reset_failed_students_in_cohort(cohort_id: int) -> int:
+    """Reset all students in a cohort whose status is 'error' back to 'pending'.
+
+    Clears error_message too. Returns the number of rows updated.
+    Used by the «🔄 Retry failed» button — куратор может перезапустить
+    обработку студентов, которые упали (Drive timeout, LLM error, etc.)
+    после того как причина устранена.
+    """
+    with get_engine().begin() as conn:
+        res = conn.execute(
+            update(students_t)
+            .where(students_t.c.cohort_id == cohort_id)
+            .where(students_t.c.status == "error")
+            .values(status="pending", error_message=None)
+        )
+        # Also reset cohort status back to pending if it was done_with_errors
+        conn.execute(
+            update(cohorts)
+            .where(cohorts.c.id == cohort_id)
+            .where(cohorts.c.status.in_(("done", "done_with_errors")))
+            .values(status="pending")
+        )
+        return res.rowcount or 0
+
+
+def list_failed_students_in_cohort(cohort_id: int) -> list:
+    """Return all students in this cohort with status='error' and their messages."""
+    with get_engine().connect() as conn:
+        return list(
+            conn.execute(
+                select(students_t)
+                .where(students_t.c.cohort_id == cohort_id)
+                .where(students_t.c.status == "error")
+                .order_by(students_t.c.id)
+            ).mappings().all()
+        )
+def find_student_by_file(cohort_id: int, gdrive_file_id: str):
+    """Найти студента в когорте по Drive-file-id. None если не найден.
+
+    Используется для дедупликации при повторном Scan & Import — без этой
+    проверки повторный импорт создаёт дубли для каждого PDF.
+    """
+    with get_engine().connect() as conn:
+        return conn.execute(
+            select(students_t)
+            .where(students_t.c.cohort_id == cohort_id)
+            .where(students_t.c.gdrive_file_id == gdrive_file_id)
+            .limit(1)
+        ).mappings().first()
+
+
+def reactivate_cohort(cohort_id: int) -> None:
+    """Вернуть soft-удалённую когорту обратно в проект (in_project=1).
+
+    Используется в drive_walker.scan_and_import_root: если при повторном
+    Scan находится существующая когорта с тем же ключом, но кто-то её ранее
+    удалил кнопкой 🗑️, мы возвращаем её — пользователь явно повторно
+    импортировал ту же папку, значит хочет её снова видеть.
+    """
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(cohorts).where(cohorts.c.id == cohort_id).values(in_project=1)
+        )
+
+
+def reset_student_for_reprocessing(student_id: int) -> None:
+    """Полностью очистить студента, чтобы его прогнали через ИИ заново.
+
+    Удаляет все task_results, сбрасывает status='pending', обнуляет
+    error_message и review_status. detected_variant НЕ трогаем — куратор
+    мог его вручную выставить, и мы хотим прогон именно с этим вариантом.
+
+    Используется в Review Panel после ручного выбора варианта: «Применить
+    вариант и переотправить ученика на проверку».
+    """
+    with get_engine().begin() as conn:
+        conn.execute(
+            task_results.delete().where(task_results.c.student_id == student_id)
+        )
+        conn.execute(
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(status="pending", error_message=None, review_status=None)
+        )
+
+
+def clear_student_error(student_id: int) -> None:
+    """Обнулить error_message студента (после успешного retry)."""
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(error_message=None)
+        )
+
+
 
 
 # ---------------------------------------------------------------------------

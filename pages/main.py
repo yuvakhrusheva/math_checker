@@ -1,96 +1,132 @@
-"""Main screen (Cohort Queue) — Task 9.
+"""Main screen (Cohort Queue) — v4 (fixes15).
 
-Provides operator workflow: view all cohorts, add new cohorts with validation,
-edit/delete pending cohorts, start the processing queue, and watch live progress.
-All UI text in English (CA-28). Supports CA-4 through CA-9.
+Двухэтапный импорт:
+  1) Куратор вставляет URL корневой папки и нажимает «🔍 Browse folder
+     structure». Это быстро — система проходит дерево ДО уровня учителей
+     (без захода в PDF) и складывает доступные секторы / классы / школы /
+     учителей в session_state.
+  2) Появляются 4 каскадных дропдауна. Куратор выбирает «свою» подветку
+     (или оставляет «All» где-то). Нажимает «📥 Import selected» — система
+     обходит ТОЛЬКО выбранную часть дерева и создаёт когорты + студентов.
+
+Это нужно, чтобы:
+  - каждый куратор работал со своим набором (по сектору / классу / школе /
+    учителю), не плодя лишние когорты в общей БД;
+  - случайно не залить весь объём, когда нужна только одна школа.
+
+Также fixes15 убирает старый баг «116 PDF вместо 32» — теперь повторный
+Scan дедуплицирует студентов по gdrive_file_id (см. drive_walker).
 """
+from datetime import date as _date
+
 import streamlit as st
 
 import src.db as db
 import src.queue_processor as queue_processor
 import src.criteria_loader as criteria_loader
 import src.drive as drive
+import src.drive_walker as drive_walker
 
 
 # ---------------------------------------------------------------------------
-# Testable helper functions (imported by tests/unit/test_main_helpers.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
-def validate_gdrive_url(url: str | None) -> str | None:
-    """Return None if valid Google Drive URL, or error message string if invalid."""
+def validate_gdrive_url(url):
     if not url or "drive.google.com" not in url:
         return "URL must be a Google Drive folder URL containing 'drive.google.com'"
     return None
 
 
-def should_disable_start_button() -> bool:
-    """Return True if the Start Processing button should be disabled."""
+def should_disable_start_button():
     return queue_processor.is_running()
 
 
-def try_add_cohort(
+def try_browse_root(gdrive_url: str):
+    """Phase 1: walk down to teacher folders only, return TeacherEntry list."""
+    err = validate_gdrive_url(gdrive_url)
+    if err:
+        return None, err
+    try:
+        root_id = drive.extract_folder_id(gdrive_url)
+    except ValueError as exc:
+        return None, f"Invalid Google Drive URL: {exc}"
+    try:
+        service = drive.get_service()
+    except Exception as exc:
+        return None, f"Could not connect to Drive: {exc}"
+    try:
+        entries = drive_walker.discover_options_shallow(service, root_id)
+    except Exception as exc:
+        return None, f"Browse failed: {exc}"
+    return {"root_id": root_id, "url": gdrive_url, "entries": entries}, None
+
+
+def try_import_selected(
     gdrive_url: str,
-    school: str,
-    teacher: str,
-    class_number: int,
-    class_letter: str,
-    language: str,
-    test_date: str,
-    grade: int,
-) -> tuple[int | None, str | None]:
-    """
-    Validate inputs, enumerate PDFs from the Drive folder, and create the
-    cohort together with one student row per PDF.
+    filters: dict,
+    progress_callback=None,
+):
+    err = validate_gdrive_url(gdrive_url)
+    if err:
+        return None, err
+    try:
+        root_id = drive.extract_folder_id(gdrive_url)
+    except ValueError as exc:
+        return None, f"Invalid Google Drive URL: {exc}"
+    try:
+        service = drive.get_service()
+    except Exception as exc:
+        return None, f"Could not connect to Drive: {exc}"
+    try:
+        summary = drive_walker.scan_and_import_root(
+            service, root_id, root_folder_url=gdrive_url,
+            progress_callback=progress_callback,
+            filters=filters,
+        )
+    except Exception as exc:
+        return None, f"Import failed: {exc}"
+    return summary, None
 
-    Returns (cohort_id, None) on success or (None, error_message) on failure.
-    Drive enumeration runs before the cohort row is inserted, so an empty or
-    unreachable folder never leaves a dangling cohort behind.
-    """
-    url_error = validate_gdrive_url(gdrive_url)
-    if url_error:
-        return None, url_error
 
+def try_add_cohort(
+    gdrive_url, school, teacher, class_number, class_letter,
+    language, test_date, grade,
+):
+    err = validate_gdrive_url(gdrive_url)
+    if err:
+        return None, err
     if not criteria_loader.criteria_exists(grade, language):
         return None, (
             f"No criteria loaded for Grade {grade} / {language.upper()}. "
-            "Please upload the criteria JSON file on the Criteria Management page first."
+            "Upload the criteria JSON file on the Criteria Management page first."
         )
-
     try:
         folder_id = drive.extract_folder_id(gdrive_url)
     except ValueError as exc:
         return None, f"Invalid Google Drive URL: {exc}"
-
     try:
         service = drive.get_service()
         pdfs = drive.list_pdfs(service, folder_id)
     except Exception as exc:
         return None, f"Could not read Drive folder: {exc}"
-
     if not pdfs:
-        return None, (
-            "No PDF files found in the Drive folder. "
-            "Check the URL and that the service account has access."
-        )
-
+        return None, "No PDF files found in the Drive folder."
     cohort_id = db.create_cohort(
-        gdrive_folder_url=gdrive_url,
-        gdrive_folder_id=folder_id,
-        school=school,
-        teacher=teacher,
-        class_number=class_number,
-        class_letter=class_letter,
-        language=language,
-        test_date=str(test_date),
-        grade=grade,
+        gdrive_folder_url=gdrive_url, gdrive_folder_id=folder_id,
+        school=school, teacher=teacher, class_number=class_number,
+        class_letter=class_letter, language=language,
+        test_date=str(test_date), grade=grade,
     )
     for pdf in pdfs:
-        db.create_student(cohort_id, pdf["id"], pdf["name"])
+        existing = db.find_student_by_file(cohort_id, pdf["id"])
+        if existing is None:
+            db.create_student(cohort_id, pdf["id"], pdf["name"])
     return cohort_id, None
 
 
 # ---------------------------------------------------------------------------
-# Page rendering
+# UI helpers
 # ---------------------------------------------------------------------------
 
 _STATUS_LABELS = {
@@ -101,14 +137,13 @@ _STATUS_LABELS = {
 }
 
 _LANG_LABELS = {"ru": "Russian", "az": "Azerbaijani"}
+_SECTOR_LABEL = {"ru": "Ру сектор", "az": "Аз сектор"}
 
 
 def _render_cohort_table(cohorts):
-    """Render the cohort queue table with Edit/Delete actions for pending cohorts."""
     if not cohorts:
         st.info("No cohorts in queue. Add one below.")
         return
-
     for cohort in cohorts:
         students = db.list_students_by_cohort(cohort["id"])
         total = len(students)
@@ -117,6 +152,8 @@ def _render_cohort_table(cohorts):
             if s["status"] in ("processed", "requires_review", "unreadable", "error")
         )
         status_label = _STATUS_LABELS.get(cohort["status"], cohort["status"])
+        n_errors = sum(1 for s in students if s["status"] == "error")
+        status_display = f"{status_label} ({n_errors}❌)" if n_errors else status_label
 
         cols = st.columns([2, 1, 1, 1, 1, 2, 1, 1])
         cols[0].write(f"**{cohort['school']}**")
@@ -124,25 +161,31 @@ def _render_cohort_table(cohorts):
         cols[2].write(cohort["teacher"])
         cols[3].write(cohort["test_date"])
         cols[4].write(_LANG_LABELS.get(cohort["language"], cohort["language"]))
-        cols[5].write(status_label)
+        cols[5].write(status_display)
         cols[6].write(f"{processed}/{total}")
 
-        if cohort["status"] == "pending":
-            with cols[7]:
+        with cols[7]:
+            if cohort["status"] == "pending":
                 if st.button("✏️", key=f"edit_{cohort['id']}", help="Edit"):
                     st.session_state[f"editing_{cohort['id']}"] = True
                 if st.button("🗑️", key=f"del_{cohort['id']}", help="Delete"):
-                    # Soft-delete: mark in_project=0 so cohort is hidden
                     db.update_cohort_metadata(cohort["id"], in_project=0)
                     st.rerun()
-
-        # Inline edit form
+            if n_errors > 0 and not queue_processor.is_running():
+                if st.button("🔄", key=f"retry_{cohort['id']}",
+                             help=f"Retry {n_errors} failed students"):
+                    db.reset_failed_students_in_cohort(cohort["id"])
+                    st.success(f"{n_errors} students reset to pending. Press ▶️ Start Processing.")
+                    st.rerun()
+        if n_errors > 0:
+            with st.expander(f"⚠️ {n_errors} failed students — view error messages"):
+                for s in db.list_failed_students_in_cohort(cohort["id"]):
+                    st.write(f"- **{s['filename']}**: {s['error_message'] or '(no message)'}")
         if st.session_state.get(f"editing_{cohort['id']}"):
             _render_edit_form(cohort)
 
 
 def _render_edit_form(cohort):
-    """Render an inline edit form for a pending cohort."""
     with st.form(key=f"edit_form_{cohort['id']}"):
         st.write(f"**Edit cohort {cohort['id']}**")
         school = st.text_input("School", value=cohort["school"])
@@ -153,18 +196,13 @@ def _render_edit_form(cohort):
         test_date = st.text_input("Test date (YYYY-MM-DD)", value=cohort["test_date"])
         language = st.selectbox("Language", ["ru", "az"],
                                 index=0 if cohort["language"] == "ru" else 1)
-
         col1, col2 = st.columns(2)
         if col1.form_submit_button("Save"):
             try:
                 db.update_cohort_metadata(
-                    cohort["id"],
-                    school=school,
-                    teacher=teacher,
-                    class_number=int(class_number),
-                    class_letter=class_letter,
-                    test_date=test_date,
-                    language=language,
+                    cohort["id"], school=school, teacher=teacher,
+                    class_number=int(class_number), class_letter=class_letter,
+                    test_date=test_date, language=language,
                 )
                 del st.session_state[f"editing_{cohort['id']}"]
                 st.rerun()
@@ -175,9 +213,152 @@ def _render_edit_form(cohort):
             st.rerun()
 
 
+# ---------------------------------------------------------------------------
+# Root import — two-phase: Browse, then Import selected
+# ---------------------------------------------------------------------------
+
+_BROWSE_KEY = "root_import_browse_data"
+
+
+def _render_root_import_form():
+    with st.expander("📁 Import from root folder (auto-detect cohorts)", expanded=True):
+        st.caption(
+            "**Шаг 1.** Вставь ссылку на корневую папку и нажми «Browse» — система "
+            "найдёт доступные секторы, классы, школы и учителей. **Шаг 2.** Выбери, "
+            "что именно ты хочешь проверять (или «All» — на все). Только эта подветка "
+            "будет добавлена в очередь."
+        )
+
+        root_url = st.text_input(
+            "Root folder URL",
+            value=st.session_state.get(_BROWSE_KEY, {}).get("url", ""),
+            placeholder="https://drive.google.com/drive/folders/<id>",
+            key="root_import_url",
+        )
+
+        browse_col, reset_col = st.columns([1, 1])
+        with browse_col:
+            if st.button("🔍 Browse folder structure"):
+                with st.spinner("Walking Drive folder structure (down to teacher level)…"):
+                    data, error = try_browse_root(root_url)
+                if error:
+                    st.error(error)
+                else:
+                    if not data["entries"]:
+                        st.warning(
+                            "Browse finished, but no recognizable teacher folders "
+                            "were found. Check folder structure and service-account access."
+                        )
+                    st.session_state[_BROWSE_KEY] = data
+                    st.rerun()
+        with reset_col:
+            if _BROWSE_KEY in st.session_state and st.button("↻ Reset"):
+                del st.session_state[_BROWSE_KEY]
+                st.rerun()
+
+        browse_data = st.session_state.get(_BROWSE_KEY)
+        if not browse_data:
+            return
+
+        entries = browse_data["entries"]
+        if not entries:
+            return
+
+        st.success(f"Found {len(entries)} teacher folders. Pick what to import:")
+
+        # Cascading filters
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            sectors = sorted({e.language for e in entries})
+            sector_choice = st.selectbox(
+                "Sector",
+                ["All"] + [_SECTOR_LABEL.get(s, s) for s in sectors],
+                key="import_sector",
+            )
+        sector_value = None
+        if sector_choice != "All":
+            for code, lbl in _SECTOR_LABEL.items():
+                if lbl == sector_choice:
+                    sector_value = code
+                    break
+
+        after_s = [e for e in entries if sector_value is None or e.language == sector_value]
+
+        with c2:
+            grades = sorted({e.grade for e in after_s})
+            grade_choice = st.selectbox(
+                "Grade", ["All"] + [f"{g} класс" for g in grades],
+                key="import_grade",
+            )
+        grade_value = int(grade_choice.split()[0]) if grade_choice != "All" else None
+        after_g = [e for e in after_s if grade_value is None or e.grade == grade_value]
+
+        with c3:
+            schools = sorted({e.school for e in after_g})
+            school_choice = st.selectbox(
+                "School", ["All"] + schools, key="import_school",
+            )
+        school_value = None if school_choice == "All" else school_choice
+        after_sc = [e for e in after_g if school_value is None or e.school == school_value]
+
+        with c4:
+            teachers = sorted({e.teacher for e in after_sc})
+            teacher_choice = st.selectbox(
+                "Teacher", ["All"] + teachers, key="import_teacher",
+            )
+        teacher_value = None if teacher_choice == "All" else teacher_choice
+        after_t = [e for e in after_sc if teacher_value is None or e.teacher == teacher_value]
+
+        st.caption(
+            f"**Selection:** {len(after_t)} teacher folders match. They will "
+            "become cohorts after Import."
+        )
+
+        if st.button("📥 Import selected"):
+            if not after_t:
+                st.warning("Nothing to import — selection is empty.")
+                return
+            filters = {
+                "sector": sector_value,
+                "grade": grade_value,
+                "school": school_value,
+                "teacher": teacher_value,
+            }
+            status_box = st.status("Starting import…", expanded=True)
+
+            def on_progress(stage: str, current: int, total: int) -> None:
+                if stage == "walking":
+                    status_box.update(label=f"🔍 Walking selected branch… ({current} items)")
+                elif stage == "saving":
+                    if current < total:
+                        status_box.update(label=f"💾 Saving to DB — {current}/{total}…")
+                    else:
+                        status_box.update(label=f"💾 Saved {total} items to DB ✓")
+
+            summary, error = try_import_selected(
+                browse_data["url"], filters=filters,
+                progress_callback=on_progress,
+            )
+            if error:
+                status_box.update(label="❌ Import failed", state="error")
+                st.error(f"Import failed: {error}")
+                return
+            status_box.update(label="✅ Import complete", state="complete")
+            st.success(
+                f"Created {summary.cohorts_created} cohorts, "
+                f"{summary.students_created} students. "
+                f"Skipped {summary.students_skipped_dupes} duplicates. "
+                f"{summary.students_flagged_for_review} flagged for manual review."
+            )
+            if summary.errors:
+                with st.expander(f"⚠️ {len(summary.errors)} issues during import"):
+                    for line in summary.errors:
+                        st.write(f"- {line}")
+            st.rerun()
+
+
 def _render_add_form():
-    """Render the Add Cohort expandable form."""
-    with st.expander("➕ Add Cohort"):
+    with st.expander("➕ Add Cohort (manual, single folder)"):
         with st.form("add_cohort_form"):
             gdrive_url = st.text_input("Google Drive folder URL")
             school = st.text_input("School")
@@ -185,24 +366,17 @@ def _render_add_form():
             class_number = col1.number_input("Class number", min_value=1, max_value=11, value=3)
             class_letter = col2.text_input("Class letter", value="A")
             teacher = st.text_input("Teacher name")
-            test_date = st.date_input("Test date")
+            test_date = st.date_input("Test date", value=_date.today())
             col3, col4 = st.columns(2)
             language = col3.selectbox("Language", ["ru", "az"],
                                       format_func=lambda x: _LANG_LABELS[x])
             grade = col4.selectbox("Grade", [2, 3])
-
             submitted = st.form_submit_button("Add Cohort")
-
         if submitted:
             cohort_id, error = try_add_cohort(
-                gdrive_url=gdrive_url,
-                school=school,
-                teacher=teacher,
-                class_number=int(class_number),
-                class_letter=class_letter,
-                language=language,
-                test_date=str(test_date),
-                grade=int(grade),
+                gdrive_url=gdrive_url, school=school, teacher=teacher,
+                class_number=int(class_number), class_letter=class_letter,
+                language=language, test_date=str(test_date), grade=int(grade),
             )
             if error:
                 st.error(f"Cannot add cohort: {error}")
@@ -214,26 +388,20 @@ def _render_add_form():
 
 @st.fragment(run_every=2)
 def _render_progress():
-    """Live progress section — updates every 2 seconds without full page reload."""
     cohorts = db.list_cohorts()
     processing = [c for c in cohorts if c["status"] == "processing"]
     if not processing:
         st.caption("No cohorts currently processing.")
         return
-
     st.subheader("Live Progress")
     for cohort in processing:
         students = db.list_students_by_cohort(cohort["id"])
         total = len(students)
         if total == 0:
             continue
-        done = sum(
-            1 for s in students
-            if s["status"] not in ("pending", "processing")
-        )
+        done = sum(1 for s in students if s["status"] not in ("pending", "processing"))
         errors = sum(1 for s in students if s["status"] == "error")
         reviews = sum(1 for s in students if s["status"] == "requires_review")
-
         label = f"{cohort['school']} — {cohort['class_number']}{cohort['class_letter']}"
         st.write(f"**{label}** — {done}/{total} processed | {reviews} for review | {errors} errors")
         st.progress(done / total if total else 0)
@@ -245,7 +413,6 @@ def _render_progress():
 
 st.title("Cohort Queue")
 
-# Column headers
 hdr = st.columns([2, 1, 1, 1, 1, 2, 1, 1])
 hdr[0].write("**School**")
 hdr[1].write("**Class**")
@@ -262,18 +429,28 @@ cohorts = [c for c in db.list_cohorts() if c["in_project"]]
 _render_cohort_table(cohorts)
 
 st.divider()
+_render_root_import_form()
 _render_add_form()
 
 st.divider()
 
-# Start Processing button
-btn_col, status_col = st.columns([1, 3])
-with btn_col:
+start_col, stop_col, status_col = st.columns([1, 1, 3])
+with start_col:
     if st.button("▶️ Start Processing", disabled=should_disable_start_button()):
         queue_processor.start()
         st.success("Processing started.")
         st.rerun()
-
+with stop_col:
+    if st.button("⏹ Stop Processing",
+                 disabled=not queue_processor.is_running(),
+                 help="Signals the queue to stop after the current student finishes"):
+        queue_processor.force_reset()
+        st.warning(
+            "Stop requested. Текущий ученик доидёт до конца (LLM-вызов нельзя "
+            "оборвать на середине), потом обработчик остановится. "
+            "Через 10-30 секунд снова сможешь нажать ▶️ Start Processing."
+        )
+        st.rerun()
 with status_col:
     if queue_processor.is_running():
         st.info("⚙️ Queue processor is running…")

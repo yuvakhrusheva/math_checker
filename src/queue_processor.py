@@ -50,6 +50,37 @@ def sanitize_error_message(msg: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Transient-error retry helper
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+_DEFAULT_RETRY_DELAYS = (1.0, 3.0)  # try 3 attempts total: immediate, +1s, +3s
+
+
+def _retry_call(fn, delays=_DEFAULT_RETRY_DELAYS, what: str = "operation"):
+    """Run fn(), retrying on transient errors.
+
+    Returns (result, None) on success, or (None, exception) when ALL attempts
+    fail. Used for Drive download and LLM call — both can fail with timeouts,
+    rate limits or network glitches that resolve on retry.
+    """
+    last_exc = None
+    for i, delay in enumerate([0.0] + list(delays)):
+        if delay > 0:
+            _time.sleep(delay)
+        try:
+            return fn(), None
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "%s failed on attempt %d/%d: %s",
+                what, i + 1, len(delays) + 1, exc,
+            )
+    return None, last_exc
+
+
+# ---------------------------------------------------------------------------
 # Pipeline helpers
 # ---------------------------------------------------------------------------
 
@@ -73,8 +104,13 @@ def _determine_student_status(grading_result: dict) -> str:
     if tasks and all_empty and all_high:
         return "unreadable"
 
-    # Any task has low confidence → requires_review
-    if any(t.get("confidence") == "low" for t in tasks):
+    # Any task has low confidence AND a non-empty answer → requires_review.
+    # Если ответ пустой — балл точно 0, проверять нечего, не флагаем.
+    if any(
+        t.get("confidence") == "low"
+        and (t.get("recognized_answer") or "").strip()
+        for t in tasks
+    ):
         return "requires_review"
 
     return "processed"
@@ -172,37 +208,56 @@ class ProcessingThread(threading.Thread):
         student_id = student["id"]
         db.update_student_status(student_id, "processing")
 
-        # Step 1: Download PDF
-        path, error_info = drive.download_pdf(
-            service,
-            student["gdrive_file_id"],
-            student["filename"],
-            cohort_id,
-        )
-        if error_info is not None:
-            msg = sanitize_error_message(error_info.get("error", "Download failed"))
-            db.update_student_status(student_id, "error", msg)
+        # Step 1: Download PDF (with up to 3 attempts on transient errors)
+        def _do_download():
+            p, err = drive.download_pdf(
+                service, student["gdrive_file_id"], student["filename"], cohort_id,
+            )
+            if err is not None:
+                raise RuntimeError(err.get("error", "Download failed"))
+            return p
+
+        path, exc = _retry_call(_do_download, what="Drive download")
+        if exc is not None:
+            msg = sanitize_error_message(str(exc))
+            # Не 'error', а 'requires_review' — куратор увидит студента в
+            # Review Panel вместе с сообщением об ошибке и сможет нажать Retry.
+            db.update_student_status(student_id, "requires_review", msg)
+            try:
+                db.set_review_pending(student_id)
+            except AttributeError:
+                pass
             return True
 
         # Step 2: Convert PDF to images
         try:
             pages = pdf_processor.pdf_to_images(str(path))
         except pdf_processor.UnreadablePDFError as exc:
-            db.update_student_status(student_id, "unreadable",
-                                     sanitize_error_message(str(exc)))
+            db.update_student_status(student_id, "requires_review",
+                                     sanitize_error_message(f"Unreadable PDF: {exc}"))
+            try:
+                db.set_review_pending(student_id)
+            except AttributeError:
+                pass
             return True
 
         # Step 3: Grade via LLM. Default variant = 1 if available, else the only one.
         default_variant = 1 if 1 in criteria_by_variant else next(iter(criteria_by_variant))
-        try:
-            result = grader.grade_student(pages, criteria_by_variant[default_variant])
-        except json.JSONDecodeError as exc:
-            db.update_student_status(student_id, "error",
-                                     sanitize_error_message(f"LLM response not valid JSON: {exc}"))
-            return True
-        except Exception as exc:
-            db.update_student_status(student_id, "error",
-                                     sanitize_error_message(str(exc)))
+        result, exc = _retry_call(
+            lambda: grader.grade_student(pages, criteria_by_variant[default_variant]),
+            what="LLM grade_student",
+        )
+        if exc is not None:
+            if isinstance(exc, json.JSONDecodeError):
+                msg = f"LLM response not valid JSON: {exc}"
+            else:
+                msg = str(exc)
+            db.update_student_status(student_id, "requires_review",
+                                     sanitize_error_message(msg))
+            try:
+                db.set_review_pending(student_id)
+            except AttributeError:
+                pass
             return True
 
         # Step 3b: If the LLM detected a different variant and we have criteria
@@ -215,28 +270,39 @@ class ProcessingThread(threading.Thread):
             try:
                 result = grader.grade_student(pages, criteria_by_variant[detected])
             except json.JSONDecodeError as exc:
-                db.update_student_status(student_id, "error",
+                db.update_student_status(student_id, "requires_review",
                                          sanitize_error_message(f"LLM response not valid JSON: {exc}"))
+                try:
+                    db.set_review_pending(student_id)
+                except AttributeError:
+                    pass
                 return True
             except Exception as exc:
-                db.update_student_status(student_id, "error",
+                db.update_student_status(student_id, "requires_review",
                                          sanitize_error_message(str(exc)))
+                try:
+                    db.set_review_pending(student_id)
+                except AttributeError:
+                    pass
                 return True
 
-        # Step 4: Persist recognized name + variant
-        if result.get("recognized_student_name"):
-            db.update_student_recognized_name(
-                student_id, result["recognized_student_name"]
-            )
+        # Step 4: Persist detected variant. ФИО НЕ обновляем из LLM —
+        # оно уже взято из имени PDF-файла в drive_walker при импорте.
         if result.get("detected_variant") is not None:
             db.update_student_variant(student_id, result["detected_variant"])
 
         # Step 5: Save task results
         _save_task_results(student_id, result)
 
-        # Step 6: Determine and set final status
+        # Step 6: Determine and set final status. Если предыдущая попытка
+        # упала с ошибкой, на студенте мог остаться error_message — обнуляем,
+        # чтобы он не сбивал куратора в Review Panel.
         final_status = _determine_student_status(result)
         db.update_student_status(student_id, final_status)
+        try:
+            db.clear_student_error(student_id)
+        except AttributeError:
+            pass
         if final_status == "requires_review":
             db.set_review_pending(student_id)
         return False
@@ -270,3 +336,19 @@ def request_stop() -> None:
     with _lock:
         if _thread is not None:
             _thread.request_stop()
+
+
+def force_reset() -> None:
+    """Reset the queue-processor state to allow a fresh Start after Stop.
+
+    Used by the UI when the user pressed Stop and wants to start a new run.
+    Does NOT kill the running thread mid-LLM call (Python can't safely do
+    that). It signals stop, and if the thread already finished — clears the
+    global handle so start() can spawn a new one.
+    """
+    global _thread
+    with _lock:
+        if _thread is not None:
+            _thread.request_stop()
+            if not _thread.is_alive():
+                _thread = None

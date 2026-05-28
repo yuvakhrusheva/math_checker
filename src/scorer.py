@@ -38,6 +38,12 @@ _DASH_TRANS = str.maketrans({c: "-" for c in _DASH_CHARS})
 # Извлекаем "хвост" после последнего знака равенства: "24 + 37 = 61" → "61".
 _EQ_TAIL_RE = re.compile(r"=\s*([^=]+)\s*$")
 
+# Извлекаем "хвост" после слова "Ответ:" / "ответ:" / "Ответ —" и т.п.
+# Это нужно, когда LLM записал и вычисления, и финальный ответ одной строкой.
+_OTVET_TAIL_RE = re.compile(
+    r"(?:^|[^\w])[оО][тТ][вВ][еЕ][тТ]\s*[:\-—–]\s*(.+?)\s*$"
+)
+
 # Чисто числовое содержимое (после нормализации) — для типа numeric.
 _NUM_RE = re.compile(r"^-?\d+([.,]\d+)?$")
 
@@ -76,7 +82,7 @@ def compute_score(
     Returns (score, grading_notes).
     """
     answer = (recognized_answer or "").strip()
-    if not answer:
+    if not answer or _looks_like_empty_marker(answer):
         return 0.0, "No answer provided"
 
     tiers: list[dict] = task_criteria.get("tiers", [])
@@ -376,17 +382,43 @@ def _classify_tier_via_llm(answer: str, task_criteria: dict) -> str:
 
 
 def _matches(answer: str, correct_answers: list[str], answer_type: str) -> bool:
-    """Return True if the answer matches any of the accepted correct answers."""
+    """Return True if the answer matches any of the accepted correct answers.
+
+    Сравниваем несколько вариантов:
+    1) Целиком (после нормализации).
+    2) Хвост после слова «Ответ:» — на случай если LLM записал и
+       вычисления, и финальный ответ.
+    3) Хвост после последнего знака равенства — для уравнений вида
+       «24 + 37 = 61».
+    """
     answer_norm = _normalize(answer, answer_type)
+    otvet_tail = _extract_otvet_tail(answer)
+    otvet_tail_norm = _normalize(otvet_tail, answer_type) if otvet_tail else ""
+    eq_tail = _extract_eq_tail(answer)
+    eq_tail_norm = _normalize(eq_tail, answer_type) if eq_tail else ""
+
     for correct in correct_answers:
-        if _normalize(correct, answer_type) == answer_norm:
+        correct_norm = _normalize(correct, answer_type)
+        if correct_norm == answer_norm:
             return True
-        # Если эталон — голое число, а ученик написал "expr = number" —
-        # сравним числовой хвост.
-        tail = _extract_eq_tail(answer)
-        if tail and _normalize(tail, answer_type) == _normalize(correct, answer_type):
+        if otvet_tail_norm and otvet_tail_norm == correct_norm:
+            return True
+        if eq_tail_norm and eq_tail_norm == correct_norm:
+            return True
+        # Иногда эталон — это короткое слово/число, а ответ ученика
+        # дополнительно содержит его (например "в среду" внутри "Меньше всего
+        # потратили в среду"). Подстрочный поиск ТОЛЬКО когда эталон
+        # достаточно длинный (>= 3 символа после нормализации), иначе можно
+        # ложно сматчить «1» в «10».
+        if len(correct_norm) >= 3 and correct_norm in answer_norm:
             return True
     return False
+
+
+def _extract_otvet_tail(value: str) -> str:
+    """Из строки '... Ответ: 14 наклеек' вернуть '14 наклеек'. Иначе ''."""
+    m = _OTVET_TAIL_RE.search(value)
+    return m.group(1).strip() if m else ""
 
 
 def _extract_eq_tail(value: str) -> str:
@@ -442,3 +474,21 @@ def _normalize(value: str, answer_type: str) -> str:
             v = v.replace(",", ".")
 
     return v
+
+# Маркеры «нет ответа» — LLM иногда записывает не пустую строку, а тире,
+# слово «пусто» / «нет ответа». Считаем такие случаи нулём без LLM-вызова.
+_EMPTY_MARKERS = {
+    "", "-", "—", "–", "−",
+    "нет", "нет ответа", "нет.", "—.",
+    "пусто", "пусто.", "пропуск", "пропуск.",
+    "no answer", "no", "n/a", "na", "—  —", "?",
+}
+
+
+def _looks_like_empty_marker(value: str) -> bool:
+    v = (value or "").strip().lower()
+    if not v:
+        return True
+    # Уберём все пробелы и пунктуацию, оставим знак-маркер
+    return v in _EMPTY_MARKERS
+
