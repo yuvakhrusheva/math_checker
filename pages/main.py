@@ -26,6 +26,10 @@ import src.queue_processor as queue_processor
 import src.criteria_loader as criteria_loader
 import src.drive as drive
 import src.drive_walker as drive_walker
+import src.auth as auth
+
+# Защита: страница доступна только залогиненным пользователям.
+auth.require_login()
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +156,13 @@ def _render_cohort_table(cohorts):
             if s["status"] in ("processed", "requires_review", "unreadable", "error")
         )
         status_label = _STATUS_LABELS.get(cohort["status"], cohort["status"])
-        n_errors = sum(1 for s in students if s["status"] == "error")
-        status_display = f"{status_label} ({n_errors}❌)" if n_errors else status_label
+        # Незавершённые = error / processing / pending / requires_review-с-ошибкой.
+        n_unfinished = db.count_unfinished_in_cohort(cohort["id"])
+        # Проблемные (есть сообщение/застряли) — для отдельного предупреждения.
+        failed = db.list_failed_students_in_cohort(cohort["id"])
+        status_display = (
+            f"{status_label} ({n_unfinished}⏳)" if n_unfinished else status_label
+        )
 
         cols = st.columns([2, 1, 1, 1, 1, 2, 1, 1])
         cols[0].write(f"**{cohort['school']}**")
@@ -171,16 +180,26 @@ def _render_cohort_table(cohorts):
                 if st.button("🗑️", key=f"del_{cohort['id']}", help="Delete"):
                     db.update_cohort_metadata(cohort["id"], in_project=0)
                     st.rerun()
-            if n_errors > 0 and not queue_processor.is_running():
+            # Кнопка перезапуска — когда есть незавершённые работы и
+            # обработчик сейчас не занят.
+            if n_unfinished > 0 and not queue_processor.is_running():
                 if st.button("🔄", key=f"retry_{cohort['id']}",
-                             help=f"Retry {n_errors} failed students"):
-                    db.reset_failed_students_in_cohort(cohort["id"])
-                    st.success(f"{n_errors} students reset to pending. Press ▶️ Start Processing.")
+                             help=f"Сбросить {n_unfinished} незавершённых работ "
+                                  "в очередь и вернуть когорту в pending"):
+                    n = db.reset_unfinished_students_in_cohort(cohort["id"])
+                    st.success(
+                        f"{n} работ сброшено в очередь, когорта снова pending. "
+                        "Нажми ▶️ Start Processing."
+                    )
                     st.rerun()
-        if n_errors > 0:
-            with st.expander(f"⚠️ {n_errors} failed students — view error messages"):
-                for s in db.list_failed_students_in_cohort(cohort["id"]):
-                    st.write(f"- **{s['filename']}**: {s['error_message'] or '(no message)'}")
+
+        if failed:
+            with st.expander(
+                f"⚠️ {len(failed)} работ с проблемами — посмотреть, что не так"
+            ):
+                for s in failed:
+                    msg = s["error_message"] or f"застряла в статусе «{s['status']}»"
+                    st.write(f"- **{s['filename']}**: {msg}")
         if st.session_state.get(f"editing_{cohort['id']}"):
             _render_edit_form(cohort)
 
@@ -437,7 +456,8 @@ st.divider()
 start_col, stop_col, status_col = st.columns([1, 1, 3])
 with start_col:
     if st.button("▶️ Start Processing", disabled=should_disable_start_button()):
-        queue_processor.start()
+        _cu = auth.current_user()
+        queue_processor.start(started_by=_cu["username"] if _cu else None)
         st.success("Processing started.")
         st.rerun()
 with stop_col:

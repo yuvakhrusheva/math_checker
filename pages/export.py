@@ -9,6 +9,10 @@ import streamlit as st
 
 import src.db as db
 import src.exporter as exporter
+import src.auth as auth
+
+# Защита: страница доступна только залогиненным пользователям.
+auth.require_login()
 
 
 st.title("Export")

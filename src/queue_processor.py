@@ -138,9 +138,13 @@ def _save_task_results(student_id: int, grading_result: dict) -> None:
 class ProcessingThread(threading.Thread):
     """Daemon thread that processes all pending cohorts sequentially."""
 
-    def __init__(self):
+    def __init__(self, started_by=None):
         super().__init__(daemon=True, name="QueueProcessorThread")
         self._stop_flag = threading.Event()
+        # Логин куратора, который запустил обработку — для статистики «кто
+        # сколько сделал». Авто-обработанные (processed) работы будут
+        # привязаны к нему.
+        self._started_by = started_by
 
     def request_stop(self) -> None:
         """Signal the thread to stop after the current student finishes."""
@@ -305,6 +309,15 @@ class ProcessingThread(threading.Thread):
             pass
         if final_status == "requires_review":
             db.set_review_pending(student_id)
+        elif final_status == "processed" and self._started_by:
+            # ИИ сам всё проверил и работа не требует ручной проверки —
+            # засчитываем её куратору, который запустил обработку («принято
+            # от ИИ»). Если он потом откроет Review Panel и поправит баллы,
+            # reviewed_by перезапишется на него же, а work станет «вручную».
+            try:
+                db.set_student_reviewer(student_id, self._started_by)
+            except AttributeError:
+                pass
         return False
 
 
@@ -316,12 +329,15 @@ _thread: ProcessingThread | None = None
 _lock = threading.Lock()
 
 
-def start() -> None:
-    """Start the background processing thread. No-op if already running."""
+def start(started_by=None) -> None:
+    """Start the background processing thread. No-op if already running.
+
+    started_by — логин куратора, запустившего обработку (для статистики).
+    """
     global _thread
     with _lock:
         if _thread is None or not _thread.is_alive():
-            _thread = ProcessingThread()
+            _thread = ProcessingThread(started_by=started_by)
             _thread.start()
 
 

@@ -1,88 +1,90 @@
-"""
-math_checker — Streamlit entry point.
+"""math_checker — Streamlit entry point with login gate + navigation.
 
-Validates environment on startup, initialises the database, and routes to
-the four application pages via st.navigation.
+Объединяет старую конфигурацию (validate_config + st.navigation с иконками)
+с новой формой авторизации (stage1). Страница «Manage Users» появляется в
+сайдбаре только когда залогинен админ.
 """
 import os
 
 from dotenv import load_dotenv
 
-# Load .env file before anything else
+# Load .env BEFORE any Streamlit / SQLAlchemy import that depends on it.
 load_dotenv()
 
 
 def validate_config() -> None:
-    """
-    Validate required environment variables.
-    Raises ValueError with a clear message on any problem.
-    Must be called before any Streamlit UI is rendered.
-
-    Security notes:
-    - Checks that the service account key path is absolute (no traversal via relative paths).
-    - Resolves symlinks and verifies the real path stays outside repo root.
-    """
+    """Validate required environment variables. Raise ValueError on problems."""
     key_path = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
 
     if not key_path:
         raise ValueError(
             "GOOGLE_SERVICE_ACCOUNT_JSON is not set. "
-            "Set it to the absolute path of your Google service account JSON key file "
-            "stored OUTSIDE the repository root."
+            "Set it to the absolute path of your Google service account JSON key "
+            "file stored OUTSIDE the repository root."
         )
 
     if not os.path.isabs(key_path):
         raise ValueError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON must be an absolute path, "
-            "but a relative path was provided. "
-            "Use a full absolute path such as /home/user/keys/service_account.json."
+            "GOOGLE_SERVICE_ACCOUNT_JSON must be an absolute path."
         )
 
     real_path = os.path.realpath(key_path)
-
     if not os.path.isfile(real_path):
-        raise ValueError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON points to a file that does not exist. "
-            "Make sure the file exists and the path in .env is correct."
-        )
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON points to a missing file.")
 
-    # Ensure the key file is not inside the repository root
     repo_root = os.path.realpath(os.path.dirname(__file__))
     if real_path.startswith(repo_root + os.sep) or real_path == repo_root:
         raise ValueError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON must point to a file OUTSIDE the repository root. "
-            "Move the key file to a directory outside the project folder."
+            "GOOGLE_SERVICE_ACCOUNT_JSON must point to a file OUTSIDE the repo root."
         )
 
 
 def main() -> None:
     import streamlit as st
     from src.db import init_db
+    import src.auth as auth
 
-    # Fail fast — validate config before any UI
+    st.set_page_config(page_title="Math Checker", layout="wide")
+
+    # Fail fast on bad config.
     try:
         validate_config()
     except ValueError as exc:
-        st.error(
-            f"⚠️ Configuration error: {exc}\n\n"
-            "Please check your `.env` file and restart the app."
-        )
+        st.error(f"⚠️ Configuration error: {exc}\n\nProverь .env и перезапусти.")
         st.stop()
 
-    # Initialise database (creates tables if they don't exist)
     init_db()
 
-    # Page routing — all four pages registered here (sole owner of st.navigation)
+    # --- Login gate -------------------------------------------------------
+    user = auth.login_form()
+    if user is None:
+        st.stop()
+
+    # Sidebar: user info + logout (always visible after login).
+    auth.logout_button()
+
+    # --- Navigation -------------------------------------------------------
     pages = [
-        st.Page("pages/criteria_management.py", title="Criteria Management", icon="📋"),
+        st.Page("pages/criteria_management.py",
+                title="Criteria Management", icon="📋"),
         st.Page("pages/main.py", title="Cohort Queue", icon="📂"),
         st.Page("pages/review_panel.py", title="Review Panel", icon="🔍"),
         st.Page("pages/export.py", title="Export", icon="📊"),
+        st.Page("pages/account.py", title="My Account", icon="👤"),
     ]
+
+    # Admin-only pages
+    if user["role"] == "admin":
+        pages.append(
+            st.Page("pages/manage_users.py", title="Manage Users", icon="👥")
+        )
+        pages.append(
+            st.Page("pages/curator_stats.py", title="Curator Stats", icon="📈")
+        )
+
     pg = st.navigation(pages)
     pg.run()
 
 
-# Streamlit executes this file as __main__ when running `streamlit run app.py`
 if __name__ == "__main__":
     main()

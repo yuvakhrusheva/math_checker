@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 
 from sqlalchemy import (
-    MetaData, Table, Column, Integer, String, Float, ForeignKey,
+    MetaData, Table, Column, Integer, String, Float, ForeignKey, DateTime, text, inspect,
     CheckConstraint, UniqueConstraint,
     create_engine, insert, select, update, text,
 )
@@ -172,6 +172,8 @@ students_t = Table(
     Column("review_status", String),
     Column("error_message", String),
     Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
+    Column("reviewed_by", String),
+    Column("reviewed_at", DateTime),
     CheckConstraint(
         "status IN ('pending', 'processing', 'processed', "
         "'requires_review', 'unreadable', 'error')",
@@ -201,6 +203,20 @@ task_results = Table(
 )
 
 
+users_table = Table(
+    "users", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String, nullable=False, unique=True),
+    Column("display_name", String, nullable=False),
+    Column("password_hash", String, nullable=False),
+    Column("role", String, nullable=False, server_default="curator"),
+    Column("email", String, nullable=True),
+    Column("created_at", DateTime, server_default=text("CURRENT_TIMESTAMP")),
+    CheckConstraint("role IN ('curator', 'admin')",
+                    name="ck_users_role"),
+)
+
+
 # ---------------------------------------------------------------------------
 # DB init + migrations
 # ---------------------------------------------------------------------------
@@ -216,12 +232,34 @@ def _ensure_bbox_column(engine) -> None:
             conn.commit()
 
 
+
+def _ensure_users_table(engine) -> None:
+    """Idempotent migration: create users table if missing."""
+    insp = inspect(engine)
+    if not insp.has_table("users"):
+        users_table.create(engine)
+
+
+def _ensure_reviewed_columns(engine) -> None:
+    """Idempotent migration: add reviewed_by / reviewed_at columns to students."""
+    insp = inspect(engine)
+    if not insp.has_table("students"):
+        return
+    existing = {col["name"] for col in insp.get_columns("students")}
+    with engine.begin() as conn:
+        if "reviewed_by" not in existing:
+            conn.execute(text("ALTER TABLE students ADD COLUMN reviewed_by TEXT"))
+        if "reviewed_at" not in existing:
+            conn.execute(text("ALTER TABLE students ADD COLUMN reviewed_at TIMESTAMP"))
+
 def init_db() -> None:
     engine = get_engine()
     if engine.url.drivername.startswith("sqlite") and engine.url.database:
         Path(engine.url.database).parent.mkdir(parents=True, exist_ok=True)
     metadata.create_all(engine)
     _ensure_bbox_column(engine)
+    _ensure_users_table(engine)
+    _ensure_reviewed_columns(engine)
 
 
 # ---------------------------------------------------------------------------
@@ -402,31 +440,60 @@ def set_review_pending(student_id: int) -> None:
         )
 
 
-def mark_student_reviewed(student_id: int) -> None:
+def mark_student_reviewed(student_id: int, reviewed_by: str | None = None) -> None:
+    """Mark student as done with review.
+
+    Sets status='processed', review_status='done', reviewed_by, reviewed_at.
+    reviewed_by — логин куратора (для статистики «кто сколько сделал»).
+    """
+    from datetime import datetime as _dt
     with get_engine().begin() as conn:
+        values = {
+            "status": "processed",
+            "review_status": "done",
+            "reviewed_at": _dt.utcnow(),
+        }
+        if reviewed_by:
+            values["reviewed_by"] = reviewed_by
         conn.execute(
-            update(students_t)
-            .where(students_t.c.id == student_id)
-            .values(status="processed", review_status="done")
+            update(students_t).where(students_t.c.id == student_id).values(**values)
         )
 
 
-def reset_failed_students_in_cohort(cohort_id: int) -> int:
-    """Reset all students in a cohort whose status is 'error' back to 'pending'.
+def reset_unfinished_students_in_cohort(cohort_id: int) -> int:
+    """Reset NON-finished students in a cohort back to 'pending' for reprocessing.
 
-    Clears error_message too. Returns the number of rows updated.
-    Used by the «🔄 Retry failed» button — куратор может перезапустить
-    обработку студентов, которые упали (Drive timeout, LLM error, etc.)
-    после того как причина устранена.
+    Сбрасываются:
+      - status='error'      — упавшие (старый статус, на всякий случай);
+      - status='processing' — застрявшие (обработка прервана на середине);
+      - status='requires_review' С error_message — упавшие, которые fixes13
+        переводит в review с сообщением об ошибке (LLM JSON error, SSL, и т.п.).
+
+    НЕ трогаются:
+      - status='processed'  — успешно обработано;
+      - status='requires_review' БЕЗ error_message — нормальная ручная проверка
+        (вариант/визуальная задача), её должен сделать куратор;
+      - status='unreadable' — битый PDF (повторная обработка не поможет).
+
+    Возвращает число сброшенных. Также возвращает когорту в 'pending', если
+    она была done / done_with_errors.
     """
+    from sqlalchemy import or_, and_
     with get_engine().begin() as conn:
         res = conn.execute(
             update(students_t)
             .where(students_t.c.cohort_id == cohort_id)
-            .where(students_t.c.status == "error")
-            .values(status="pending", error_message=None)
+            .where(
+                or_(
+                    students_t.c.status.in_(("error", "processing")),
+                    and_(
+                        students_t.c.status == "requires_review",
+                        students_t.c.error_message.isnot(None),
+                    ),
+                )
+            )
+            .values(status="pending", error_message=None, review_status=None)
         )
-        # Also reset cohort status back to pending if it was done_with_errors
         conn.execute(
             update(cohorts)
             .where(cohorts.c.id == cohort_id)
@@ -436,17 +503,55 @@ def reset_failed_students_in_cohort(cohort_id: int) -> int:
         return res.rowcount or 0
 
 
+# Обратная совместимость со старым именем (fixes12 UI).
+def reset_failed_students_in_cohort(cohort_id: int) -> int:
+    return reset_unfinished_students_in_cohort(cohort_id)
+
+
 def list_failed_students_in_cohort(cohort_id: int) -> list:
-    """Return all students in this cohort with status='error' and their messages."""
+    """Студенты когорты, которые НЕ обработались как надо (есть проблема).
+
+    Включает: status='error', status='processing' (застрявшие), и
+    status='requires_review' С error_message (упавшие, переведённые в review).
+    """
+    from sqlalchemy import or_, and_
     with get_engine().connect() as conn:
         return list(
             conn.execute(
                 select(students_t)
                 .where(students_t.c.cohort_id == cohort_id)
-                .where(students_t.c.status == "error")
+                .where(
+                    or_(
+                        students_t.c.status.in_(("error", "processing")),
+                        and_(
+                            students_t.c.status == "requires_review",
+                            students_t.c.error_message.isnot(None),
+                        ),
+                    )
+                )
                 .order_by(students_t.c.id)
             ).mappings().all()
         )
+
+
+def count_unfinished_in_cohort(cohort_id: int) -> int:
+    """Сколько в когорте незавершённых работ (error/processing/pending/req-review-с-ошибкой)."""
+    from sqlalchemy import or_, and_, func
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(func.count(students_t.c.id))
+            .where(students_t.c.cohort_id == cohort_id)
+            .where(
+                or_(
+                    students_t.c.status.in_(("error", "processing", "pending")),
+                    and_(
+                        students_t.c.status == "requires_review",
+                        students_t.c.error_message.isnot(None),
+                    ),
+                )
+            )
+        ).scalar()
+    return int(row or 0)
 def find_student_by_file(cohort_id: int, gdrive_file_id: str):
     """Найти студента в когорте по Drive-file-id. None если не найден.
 
@@ -495,6 +600,132 @@ def reset_student_for_reprocessing(student_id: int) -> None:
             .where(students_t.c.id == student_id)
             .values(status="pending", error_message=None, review_status=None)
         )
+
+
+def set_student_reviewer(student_id: int, reviewed_by: str) -> None:
+    """Проставить reviewed_by/reviewed_at студенту (без смены статуса).
+
+    Используется queue_processor для авто-обработанных (processed) работ —
+    засчитать их куратору, запустившему обработку. НЕ перезаписывает, если
+    студента уже отметил кто-то вручную? — перезаписывает: последний, кто
+    «коснулся» работы, и есть текущий ответственный.
+    """
+    if not reviewed_by:
+        return
+    from datetime import datetime as _dt
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(reviewed_by=reviewed_by, reviewed_at=_dt.utcnow())
+        )
+
+
+def stamp_reviewer_by_result(result_id: int, reviewed_by: str) -> None:
+    """По id задачи (task_results.id) найти студента и проставить reviewed_by/at."""
+    if not reviewed_by:
+        return
+    from datetime import datetime as _dt
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            select(task_results.c.student_id).where(task_results.c.id == result_id)
+        ).mappings().first()
+        if not row:
+            return
+        conn.execute(
+            update(students_t)
+            .where(students_t.c.id == row["student_id"])
+            .values(reviewed_by=reviewed_by, reviewed_at=_dt.utcnow())
+        )
+
+
+def get_review_stats(date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+    """Статистика «кто сколько проверил» с разбивкой по типу проверки.
+
+    Для каждого куратора (students.reviewed_by) считаем:
+      - total_reviewed   — всего работ, отмеченных куратором;
+      - manual_reviewed  — из них с РУЧНЫМИ правками баллов
+                           (есть task_results.manually_corrected=1);
+      - ai_accepted      — принято без правок (ИИ-оценка подтверждена) =
+                           total - manual;
+      - last_review      — дата последней проверки.
+
+    Опционально фильтрует по reviewed_at (строки 'YYYY-MM-DD').
+    """
+    from sqlalchemy import func, case, distinct
+    conds = [students_t.c.reviewed_by.isnot(None)]
+    if date_from:
+        conds.append(students_t.c.reviewed_at >= f"{date_from} 00:00:00")
+    if date_to:
+        conds.append(students_t.c.reviewed_at <= f"{date_to} 23:59:59")
+
+    # manual = студент, у которого ХОТЯ БЫ одна задача manually_corrected=1
+    manual_case = case(
+        (func.max(task_results.c.manually_corrected) == 1, 1),
+        else_=0,
+    )
+
+    with get_engine().connect() as conn:
+        # Сначала на уровне студента определим manual/auto, потом сгруппируем.
+        student_level = (
+            select(
+                students_t.c.reviewed_by.label("reviewed_by"),
+                students_t.c.id.label("sid"),
+                students_t.c.reviewed_at.label("reviewed_at"),
+                func.coalesce(func.max(task_results.c.manually_corrected), 0).label("is_manual"),
+            )
+            .select_from(
+                students_t.outerjoin(
+                    task_results, task_results.c.student_id == students_t.c.id
+                )
+            )
+            .where(*conds)
+            .group_by(students_t.c.id, students_t.c.reviewed_by, students_t.c.reviewed_at)
+            .subquery()
+        )
+
+        rows = conn.execute(
+            select(
+                student_level.c.reviewed_by,
+                func.count(student_level.c.sid).label("total_reviewed"),
+                func.sum(student_level.c.is_manual).label("manual_reviewed"),
+                func.max(student_level.c.reviewed_at).label("last_review"),
+            )
+            .group_by(student_level.c.reviewed_by)
+            .order_by(func.count(student_level.c.sid).desc())
+        ).mappings().all()
+
+    result = []
+    for r in rows:
+        total = int(r["total_reviewed"] or 0)
+        manual = int(r["manual_reviewed"] or 0)
+        result.append({
+            "reviewed_by": r["reviewed_by"],
+            "total_reviewed": total,
+            "manual_reviewed": manual,
+            "ai_accepted": total - manual,
+            "last_review": r["last_review"],
+        })
+    return result
+
+
+def get_reviewed_students(date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+    """Список проверенных студентов (для детализации / графика по дням)."""
+    conds = [students_t.c.reviewed_by.isnot(None)]
+    if date_from:
+        conds.append(students_t.c.reviewed_at >= f"{date_from} 00:00:00")
+    if date_to:
+        conds.append(students_t.c.reviewed_at <= f"{date_to} 23:59:59")
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(
+                students_t.c.id,
+                students_t.c.reviewed_by,
+                students_t.c.reviewed_at,
+                students_t.c.cohort_id,
+            ).where(*conds)
+        ).mappings().all()
+    return [dict(r) for r in rows]
 
 
 def clear_student_error(student_id: int) -> None:
@@ -546,6 +777,46 @@ def save_task_result(
         conn.execute(stmt)
 
 
+def save_manual_task_result(
+    student_id: int,
+    task_number: int,
+    page_number: int,
+    score: float,
+    max_score: float,
+    reviewed_by: str | None = None,
+    recognized_answer: str = "(manual)",
+) -> None:
+    """Upsert ручной проверки задачи.
+
+    Ставит confidence='high', manually_corrected=1. recognized_answer —
+    ответ ученика, который ввёл куратор (по нему ИИ уже посчитал балл).
+    Используется при ручной проверке (в т.ч. упавших работ).
+    """
+    stmt = _dialect_insert(task_results).values(
+        student_id=student_id, task_number=task_number,
+        page_number=page_number, recognized_answer=recognized_answer,
+        score=score, max_score=max_score, confidence="high",
+        grading_notes="Manually graded by curator", bbox=None,
+        manually_corrected=1,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["student_id", "task_number"],
+        set_=dict(
+            page_number=stmt.excluded.page_number,
+            recognized_answer=stmt.excluded.recognized_answer,
+            score=stmt.excluded.score,
+            max_score=stmt.excluded.max_score,
+            confidence=stmt.excluded.confidence,
+            grading_notes=stmt.excluded.grading_notes,
+            manually_corrected=stmt.excluded.manually_corrected,
+        ),
+    )
+    with get_engine().begin() as conn:
+        conn.execute(stmt)
+    if reviewed_by:
+        set_student_reviewer(student_id, reviewed_by)
+
+
 def get_task_results(student_id: int) -> list:
     with get_engine().connect() as conn:
         return conn.execute(
@@ -553,6 +824,19 @@ def get_task_results(student_id: int) -> list:
             .where(task_results.c.student_id == student_id)
             .order_by(task_results.c.task_number)
         ).mappings().all()
+
+
+def _stamp_student_reviewer(student_id, reviewed_by):
+    """Helper: stamp who manually edited a task result (for curator stats)."""
+    if not reviewed_by:
+        return
+    from datetime import datetime as _dt
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(students_t).where(students_t.c.id == student_id).values(
+                reviewed_by=reviewed_by, reviewed_at=_dt.utcnow(),
+            )
+        )
 
 
 def update_task_result(
