@@ -1,14 +1,14 @@
-"""LLM grader for math_checker — v7 (stage14).
+"""LLM grader for math_checker — v8 (stage15).
 
-stage14:
-- Усиленный промпт по определению варианта (Russian/Azerbaijani).
-- НОВОЕ: fallback-вызов detect_variant_focused — если основной grade_student
-  вернул detected_variant=null, мы делаем ВТОРОЙ короткий запрос с тем же
-  первым скан-листом и очень узким промптом «вернуть только {variant: N}».
-  Дешёвый и заметно поднимает recall по варианту (раньше при null работа
-  отправлялась на ручную проверку, теперь чаще ловится автоматом).
-- Грейдер по-прежнему распознаёт только то, что написано, не «додумывая»
-  правильные ответы.
+stage15 — ОТКАТ stage14 в части определения варианта:
+- Убран focused-fallback (detect_variant_focused). Эта функция делала
+  второй LLM-вызов с узким промптом, но на практике путала модель и
+  ломала распознавание ответов.
+- Промпт варианта возвращён к КОРОТКОЙ форме (одна строка). Раньше
+  модель видела огромный блок с 5+ форматами — это её перегружало и
+  «съедало» внимание у распознавания ответов.
+- Остальное (bbox, запрет галлюцинаций, извлечение «Ответ:», визуальные
+  задачи) — всё на месте, как в stage14.
 """
 import json
 import re
@@ -50,28 +50,20 @@ _SYSTEM_PROMPT = (
     "CRITICAL RULES:\n"
     "1. recognized_answer MUST be EXACTLY what is written on the paper. NEVER "
     "guess, NEVER substitute the student's (possibly wrong) answer with the "
-    "answer you think is correct. If you cannot read the answer reliably, "
-    "set recognized_answer=\"\" and confidence=\"low\".\n"
+    "answer you think is correct. Example: if the task is «найди уменьшаемое: "
+    "X - 18 = 45» (correct answer 63) and the student wrote «27», you MUST "
+    "return recognized_answer=\"27\". DO NOT return \"63\". If you cannot read "
+    "the answer reliably, set recognized_answer=\"\" and confidence=\"low\".\n"
     "2. For tasks where the student writes calculations AND a final answer, "
     "return ONLY the final answer in recognized_answer. Strip intermediate "
     "calculations and the word «Ответ:»/«ответ:» itself.\n"
-    "3. task_number MUST match the number printed in the «№ N» marker on the page, "
-    "NOT just the ordinal position.\n"
+    "3. task_number MUST match the number printed in the «№ N» marker on the "
+    "page, NOT the ordinal position.\n"
     "4. For visual tasks («отметь рисунок»), describe which option the student "
     "marked (e.g. «first picture marked with a tick»).\n"
-    "5. detected_variant — the test variant number printed on the page. Tests come "
-    "in TWO variants. Look CAREFULLY at the TOP of every page (header area, "
-    "right margin, even rotated corner labels). Accept ALL of these forms:\n"
-    "      • «Вариант 1» / «Вариант 2» (Russian — most common in ru sector)\n"
-    "      • «В-1» / «В-2», «вар. 1», «вар.1», «вар-1»\n"
-    "      • «Variant 1» / «Variant 2»\n"
-    "      • «Vəriant 1» / «Vəriant 2», «Variantı 1», «1-ci variant», "
-    "        «2-ci variant», «I variant», «II variant» (Azerbaijani)\n"
-    "      • Sometimes just a Roman numeral «I» or «II» or a digit in a circle/box "
-    "        next to the title.\n"
-    "   If you see ANY such marker — even a small printed «1» or «2» in the corner —"
-    " return the integer (1 or 2). Default to null ONLY if you have actually scanned "
-    "every page and found nothing. Do NOT skip variant detection.\n"
+    "5. detected_variant — the test variant number printed on the page header "
+    "(usually «Вариант 1» / «Вариант 2», or «I» / «II», or «1» / «2»). Return "
+    "1 or 2 if you see it, null otherwise.\n"
     "\n"
     "BBOX RULES (very important — reviewers crop the scan by this rectangle):\n"
     "Coordinates are normalized: (0,0)=top-left, (1,1)=bottom-right. "
@@ -143,50 +135,6 @@ def _is_visual_task(task_criteria: dict) -> bool:
     return not partial
 
 
-def detect_variant_focused(first_page_b64: str) -> int | None:
-    """Focused second-chance variant detection.
-
-    Если основной grade_student вернул detected_variant=null — вызываем
-    эту функцию с первой страницей и узким промптом. Возвращает 1, 2 или None.
-    """
-    settings = _SETTINGS
-    sys_msg = (
-        "You are looking for the test VARIANT number on the top of a scanned "
-        "math test. The page may show «Вариант 1», «Вариант 2», «В-1», «В-2», "
-        "«Variant 1/2», «Vəriant 1/2», «1-ci variant», «I», «II», or just a "
-        "small printed digit 1 or 2 in the header / right margin. "
-        "Return JSON ONLY in the form {\"variant\": 1} or {\"variant\": 2} or "
-        "{\"variant\": null}. Nothing else."
-    )
-    user_text = (
-        "Find the variant number on this scan. Look in the header, the right "
-        "margin, any boxed/circled digit. Return JSON only."
-    )
-    messages = [
-        {"role": "system", "content": sys_msg},
-        {"role": "user", "content": [
-            {"type": "text", "text": user_text},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{first_page_b64}"}},
-        ]},
-    ]
-    try:
-        response = litellm.completion(
-            model=settings["model"], messages=messages,
-            max_tokens=64, temperature=0,
-        )
-        raw = (response.choices[0].message.content or "").strip()
-        m = _FENCE_RE.match(raw)
-        if m:
-            raw = m.group(1).strip()
-        data = json.loads(raw)
-        v = data.get("variant")
-        if v in (1, 2):
-            return int(v)
-    except Exception:
-        return None
-    return None
-
-
 def grade_student(
     pages: list[tuple[int, str]],
     criteria: dict,
@@ -208,11 +156,7 @@ def grade_student(
     raw = response.choices[0].message.content
     data = _parse_llm_response(raw)
 
-    # stage14: focused fallback for variant detection.
-    if data.get("detected_variant") in (None, 0) and pages:
-        v = detect_variant_focused(pages[0][1])
-        if v is not None:
-            data["detected_variant"] = v
+    # stage15: focused-fallback по варианту убран — он ломал распознавание.
 
     tasks_criteria = {t["task_number"]: t for t in criteria.get("tasks", [])}
     pages_by_num = {pn: b64 for pn, b64 in pages}

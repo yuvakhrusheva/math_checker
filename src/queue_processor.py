@@ -1,10 +1,17 @@
-"""Background queue processor for math_checker — v3 (stage14).
+"""Background queue processor — v4 (stage15).
 
-stage14:
-- При рендере PDF учитывается students.rotate_180 — если куратор отметил
-  скан как «вверх ногами», страница рендерится повернутой на 180°.
-- Очередь по-прежнему обрабатывает ВСЕ pending когорты (изоляция кураторов
-  только на видимость в UI, а не на пайплайн обработки).
+stage15 — критичный фикс по варианту:
+- Если у student уже выставлен detected_variant (куратор задал вручную
+  через Apply variant) — используем ИМЕННО этот вариант как стартовый
+  для grade_student. Раньше очередь всегда стартовала с variant=1, потом
+  пересчитывала на основе LLM-детекции. Это означало, что ручной выбор
+  куратора по сути игнорировался при пересчёте, если модель опять не
+  смогла «увидеть» вариант на скане.
+- LLM по-прежнему может вернуть свой detected_variant, но если у ученика
+  УЖЕ есть заданный вариант — мы НЕ перескакиваем на другой. Куратор
+  знает, что в работе.
+
+Остальное (rotate_180, retry, изоляция кураторов) — без изменений.
 """
 import json
 import logging
@@ -42,10 +49,6 @@ def sanitize_error_message(msg: str | None) -> str:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Transient-error retry helper
-# ---------------------------------------------------------------------------
-
 import time as _time
 
 _DEFAULT_RETRY_DELAYS = (1.0, 3.0)
@@ -67,14 +70,17 @@ def _retry_call(fn, delays=_DEFAULT_RETRY_DELAYS, what: str = "operation"):
     return None, last_exc
 
 
-# ---------------------------------------------------------------------------
-# Pipeline helpers
-# ---------------------------------------------------------------------------
+def _determine_student_status(grading_result: dict, manual_variant: bool = False) -> str:
+    """Decide final status.
 
-def _determine_student_status(grading_result: dict) -> str:
+    manual_variant=True означает «у куратора уже стоит вариант». В этом случае
+    detected_variant=null от LLM не должен переводить работу в requires_review
+    (мы знаем вариант). Низкая confidence по задачам всё равно отправит в
+    review — это правильно.
+    """
     tasks = grading_result.get("tasks", [])
 
-    if grading_result.get("detected_variant") is None:
+    if not manual_variant and grading_result.get("detected_variant") is None:
         return "requires_review"
 
     all_empty = all(not (t.get("recognized_answer") or "").strip() for t in tasks)
@@ -106,10 +112,6 @@ def _save_task_results(student_id: int, grading_result: dict) -> None:
             bbox=task.get("bbox"),
         )
 
-
-# ---------------------------------------------------------------------------
-# ProcessingThread
-# ---------------------------------------------------------------------------
 
 class ProcessingThread(threading.Thread):
     def __init__(self, started_by=None):
@@ -173,8 +175,16 @@ class ProcessingThread(threading.Thread):
         student_id = student["id"]
         db.update_student_status(student_id, "processing")
 
-        # stage14: учитываем флаг «скан повёрнут на 180°»
         rotate_180 = bool(student.get("rotate_180") or 0)
+
+        # stage15: если куратор уже задал вариант — используем его и
+        # запрещаем LLM-перескок на другой вариант.
+        manual_variant_raw = student.get("detected_variant")
+        manual_variant = (
+            int(manual_variant_raw)
+            if manual_variant_raw is not None and int(manual_variant_raw) in criteria_by_variant
+            else None
+        )
 
         def _do_download():
             p, err = drive.download_pdf(
@@ -205,9 +215,16 @@ class ProcessingThread(threading.Thread):
                 pass
             return True
 
-        default_variant = 1 if 1 in criteria_by_variant else next(iter(criteria_by_variant))
+        # Стартовый вариант: ручной у куратора > variant=1 > первый доступный.
+        if manual_variant is not None:
+            start_variant = manual_variant
+        elif 1 in criteria_by_variant:
+            start_variant = 1
+        else:
+            start_variant = next(iter(criteria_by_variant))
+
         result, exc = _retry_call(
-            lambda: grader.grade_student(pages, criteria_by_variant[default_variant]),
+            lambda: grader.grade_student(pages, criteria_by_variant[start_variant]),
             what="LLM grade_student",
         )
         if exc is not None:
@@ -223,9 +240,11 @@ class ProcessingThread(threading.Thread):
                 pass
             return True
 
+        # Перескок на другой вариант — ТОЛЬКО если куратор сам не выставил.
         detected = result.get("detected_variant")
-        if (detected is not None
-                and detected != default_variant
+        if (manual_variant is None
+                and detected is not None
+                and detected != start_variant
                 and detected in criteria_by_variant):
             try:
                 result = grader.grade_student(pages, criteria_by_variant[detected])
@@ -246,12 +265,19 @@ class ProcessingThread(threading.Thread):
                     pass
                 return True
 
-        if result.get("detected_variant") is not None:
+        # Сохранить вариант. Если был ручной — оставляем его, не затираем тем,
+        # что вернул LLM.
+        if manual_variant is not None:
+            # уже есть в БД, оставляем
+            pass
+        elif result.get("detected_variant") is not None:
             db.update_student_variant(student_id, result["detected_variant"])
 
         _save_task_results(student_id, result)
 
-        final_status = _determine_student_status(result)
+        final_status = _determine_student_status(
+            result, manual_variant=manual_variant is not None,
+        )
         db.update_student_status(student_id, final_status)
         try:
             db.clear_student_error(student_id)
@@ -267,16 +293,11 @@ class ProcessingThread(threading.Thread):
         return False
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton API
-# ---------------------------------------------------------------------------
-
 _thread: ProcessingThread | None = None
 _lock = threading.Lock()
 
 
 def start(started_by=None) -> None:
-    """Start the background processing thread. No-op if already running."""
     global _thread
     with _lock:
         if _thread is None or not _thread.is_alive():
