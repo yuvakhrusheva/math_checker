@@ -1,20 +1,17 @@
-"""SQLAlchemy-based database layer for math_checker.
+"""SQLAlchemy-based database layer for math_checker — v3 (stage14).
 
-Поддерживает два бэкенда:
-- SQLite (по умолчанию, для локальной разработки)
-- PostgreSQL (для продакшена)
-
-Выбирается через переменную окружения DATABASE_URL. Если не задана —
-используется sqlite:///<DB_PATH> (старое поведение).
-
-Интерфейс функций (имена, аргументы, возвращаемые значения) сохранён.
-SELECT-функции возвращают sqlalchemy.RowMapping — словарь-подобный объект,
-который поддерживает row["col"], row.col, row[0]. Это совместимо со старым
-sqlite3.Row, поэтому вызывающий код (queue_processor, pages, тесты) не правится.
-
-Также экспортируется backward-compat функция get_connection() — возвращает
-DBAPI-соединение с row_factory=sqlite3.Row. Нужна для кода, который выполняет
-raw SQL (например, exporter.py с большим JOIN-запросом).
+stage14 — добавлена изоляция кураторов:
+- В таблице cohorts появилось поле owner_user_id (nullable, FK на users.id).
+- При импорте/создании когорт оно проставляется автоматически (id куратора,
+  который сделал импорт).
+- Новые функции list_cohorts_for_user / list_requires_review_for_user /
+  set_cohort_owner — для UI с фильтрацией.
+- Для admin фильтр не применяется (он видит всё).
+- Когорты с owner_user_id IS NULL (созданные ДО миграции) видят:
+    - admin (всё);
+    - любой curator (наследие, чтобы старые когорты не потерялись).
+  Если хочешь жёсткой изоляции — после миграции пройдись по cohorts и
+  расставь owner_user_id вручную (см. ИНСТРУКЦИЯ).
 """
 import os
 import sqlite3
@@ -48,8 +45,6 @@ _engine_cache: dict = {}
 def get_engine():
     url = _resolve_database_url()
     if url not in _engine_cache:
-        # Для SQLite — заранее создаём папку, в которой будет лежать .db файл.
-        # SQLite не умеет создавать БД в несуществующей директории.
         if url.startswith("sqlite:///"):
             db_file = url.replace("sqlite:///", "", 1)
             if db_file and db_file != ":memory:":
@@ -75,18 +70,6 @@ def reset_engine_cache() -> None:
 # ---------------------------------------------------------------------------
 
 class _ConnectionShim:
-    """Тонкая обёртка над sqlite3.Connection / psycopg2.connection для совместимости.
-
-    Старый код делает:
-        with db.get_connection() as conn:
-            rows = conn.execute("SELECT ...").fetchall()
-            row["col_name"]
-
-    Этот shim обеспечивает работу того же паттерна и для SQLite, и для Postgres.
-    Для SQLite — устанавливает row_factory=sqlite3.Row, чтобы row["col_name"]
-    работал. Для Postgres — оборачивает курсор в DictCursor-like.
-    """
-
     def __init__(self, engine):
         self._engine = engine
         self._raw = None
@@ -94,8 +77,6 @@ class _ConnectionShim:
     def __enter__(self):
         self._raw = self._engine.raw_connection()
         if self._engine.dialect.name == "sqlite":
-            # raw — это объект из sqlalchemy.pool, обернувший sqlite3.Connection.
-            # Реальное соединение — .driver_connection (или .connection).
             real = getattr(self._raw, "driver_connection", None) or self._raw.connection
             real.row_factory = sqlite3.Row
         return self
@@ -123,11 +104,6 @@ class _ConnectionShim:
 
 
 def get_connection():
-    """Backward-compat: вернуть DBAPI-соединение, где row["col_name"] работает.
-
-    Использовать для raw-SQL кода (см. exporter.py). Для типичных CRUD-операций
-    предпочитайте функции этого модуля (они уже возвращают RowMapping).
-    """
     return _ConnectionShim(get_engine())
 
 
@@ -152,6 +128,8 @@ cohorts = Table(
     Column("test_date", String, nullable=False),
     Column("grade", Integer, nullable=False),
     Column("status", String, nullable=False, server_default="pending"),
+    # NEW: stage14 — какой куратор создал когорту (для изоляции в UI).
+    Column("owner_user_id", Integer, ForeignKey("users.id"), nullable=True),
     CheckConstraint("language IN ('ru', 'az')", name="ck_cohorts_language"),
     CheckConstraint("grade IN (2, 3)", name="ck_cohorts_grade"),
     CheckConstraint(
@@ -174,6 +152,10 @@ students_t = Table(
     Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
     Column("reviewed_by", String),
     Column("reviewed_at", DateTime),
+    # NEW: stage14 — флаг «скан повёрнут на 180°». Если true, при следующем
+    # рендере (Pass 1 LLM или Review Panel) страница будет перевёрнута. Куратор
+    # выставляет руками, если LLM явно читает скан вверх ногами.
+    Column("rotate_180", Integer, nullable=False, server_default="0"),
     CheckConstraint(
         "status IN ('pending', 'processing', 'processed', "
         "'requires_review', 'unreadable', 'error')",
@@ -232,16 +214,13 @@ def _ensure_bbox_column(engine) -> None:
             conn.commit()
 
 
-
 def _ensure_users_table(engine) -> None:
-    """Idempotent migration: create users table if missing."""
     insp = inspect(engine)
     if not insp.has_table("users"):
         users_table.create(engine)
 
 
 def _ensure_reviewed_columns(engine) -> None:
-    """Idempotent migration: add reviewed_by / reviewed_at columns to students."""
     insp = inspect(engine)
     if not insp.has_table("students"):
         return
@@ -252,6 +231,31 @@ def _ensure_reviewed_columns(engine) -> None:
         if "reviewed_at" not in existing:
             conn.execute(text("ALTER TABLE students ADD COLUMN reviewed_at TIMESTAMP"))
 
+
+def _ensure_owner_column(engine) -> None:
+    """stage14: add cohorts.owner_user_id (nullable INT)."""
+    insp = inspect(engine)
+    if not insp.has_table("cohorts"):
+        return
+    existing = {col["name"] for col in insp.get_columns("cohorts")}
+    if "owner_user_id" not in existing:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE cohorts ADD COLUMN owner_user_id INTEGER"))
+
+
+def _ensure_rotate_180_column(engine) -> None:
+    """stage14: add students.rotate_180 (INT, default 0)."""
+    insp = inspect(engine)
+    if not insp.has_table("students"):
+        return
+    existing = {col["name"] for col in insp.get_columns("students")}
+    if "rotate_180" not in existing:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE students ADD COLUMN rotate_180 INTEGER NOT NULL DEFAULT 0"
+            ))
+
+
 def init_db() -> None:
     engine = get_engine()
     if engine.url.drivername.startswith("sqlite") and engine.url.database:
@@ -260,6 +264,8 @@ def init_db() -> None:
     _ensure_bbox_column(engine)
     _ensure_users_table(engine)
     _ensure_reviewed_columns(engine)
+    _ensure_owner_column(engine)
+    _ensure_rotate_180_column(engine)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +283,21 @@ def _dialect_insert(table_):
     return dialect_insert(table_)
 
 
+def _cohort_visibility_filter(user_id: int | None, role: str | None):
+    """Build a SQLAlchemy WHERE expr that limits cohorts to a curator's own + legacy.
+
+    - admin / None role → return None (no filter)
+    - curator → owner_user_id == user_id OR owner_user_id IS NULL (legacy)
+    """
+    if role == "admin" or user_id is None:
+        return None
+    from sqlalchemy import or_
+    return or_(
+        cohorts.c.owner_user_id == user_id,
+        cohorts.c.owner_user_id.is_(None),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cohorts
 # ---------------------------------------------------------------------------
@@ -292,6 +313,7 @@ def create_cohort(
     test_date: str,
     grade: int,
     in_project: int = 1,
+    owner_user_id: int | None = None,
 ) -> int:
     stmt = insert(cohorts).values(
         gdrive_folder_url=gdrive_folder_url,
@@ -300,6 +322,7 @@ def create_cohort(
         class_number=class_number, class_letter=class_letter,
         language=language, test_date=test_date,
         grade=grade, in_project=in_project,
+        owner_user_id=owner_user_id,
     )
     with get_engine().begin() as conn:
         result = conn.execute(stmt)
@@ -320,12 +343,25 @@ def list_cohorts() -> list:
         ).mappings().all()
 
 
-def get_next_pending_cohort():
-    """Return the oldest pending cohort that is still in the project.
+def list_cohorts_for_user(user_id: int | None, role: str | None) -> list:
+    """stage14: список когорт для UI с учётом видимости куратора.
 
-    Soft-deleted cohorts (in_project=0) are EXCLUDED — кнопка 🗑️ в Cohort
-    Queue ставит in_project=0, и без этого фильтра обработчик всё равно
-    бы их обрабатывал.
+    admin → все. curator → owner_user_id == user_id ИЛИ NULL (legacy).
+    """
+    stmt = select(cohorts).order_by(cohorts.c.created_at.desc())
+    flt = _cohort_visibility_filter(user_id, role)
+    if flt is not None:
+        stmt = stmt.where(flt)
+    with get_engine().connect() as conn:
+        return conn.execute(stmt).mappings().all()
+
+
+def get_next_pending_cohort():
+    """Очередь — глобальная (любой может запустить, обработает всё подряд).
+
+    Изоляция в stage14 — только на видимость в UI, обработка остаётся общей,
+    чтобы один куратор мог запустить очередь на всех. Если когда-нибудь
+    нужно сделать обработку «только своих» — добавь сюда owner_user_id фильтр.
     """
     with get_engine().connect() as conn:
         return conn.execute(
@@ -358,12 +394,27 @@ def update_cohort_metadata(cohort_id: int, **fields) -> None:
         if not fields:
             return
         allowed = {"school", "teacher", "class_number", "class_letter", "language",
-                   "test_date", "grade", "gdrive_folder_url", "gdrive_folder_id", "in_project"}
+                   "test_date", "grade", "gdrive_folder_url", "gdrive_folder_id",
+                   "in_project", "owner_user_id"}
         invalid = set(fields) - allowed
         if invalid:
             raise ValueError(f"Unknown cohort fields: {invalid}")
         conn.execute(
             update(cohorts).where(cohorts.c.id == cohort_id).values(**fields)
+        )
+
+
+def set_cohort_owner(cohort_id: int, owner_user_id: int | None) -> None:
+    """stage14: проставить владельца когорты (без проверки статуса).
+
+    Используется и при импорте (drive_walker), и админом для ручной
+    переустановки владельца через psql.
+    """
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(cohorts).where(cohorts.c.id == cohort_id).values(
+                owner_user_id=owner_user_id,
+            )
         )
 
 
@@ -422,11 +473,36 @@ def update_student_recognized_name(student_id: int, name: str) -> None:
         )
 
 
+def update_student_rotation(student_id: int, rotate_180: bool) -> None:
+    """stage14: проставить флаг «скан повёрнут на 180°»."""
+    with get_engine().begin() as conn:
+        conn.execute(
+            update(students_t)
+            .where(students_t.c.id == student_id)
+            .values(rotate_180=1 if rotate_180 else 0)
+        )
+
+
 def list_requires_review() -> list:
     with get_engine().connect() as conn:
         return conn.execute(
             select(students_t)
             .where(students_t.c.status == "requires_review")
+            .order_by(students_t.c.cohort_id, students_t.c.filename)
+        ).mappings().all()
+
+
+def list_requires_review_for_user(user_id: int | None, role: str | None) -> list:
+    """stage14: список работ на проверку, отфильтрованный по владельцу когорты."""
+    flt = _cohort_visibility_filter(user_id, role)
+    if flt is None:
+        return list_requires_review()
+    with get_engine().connect() as conn:
+        return conn.execute(
+            select(students_t)
+            .select_from(students_t.join(cohorts, students_t.c.cohort_id == cohorts.c.id))
+            .where(students_t.c.status == "requires_review")
+            .where(flt)
             .order_by(students_t.c.cohort_id, students_t.c.filename)
         ).mappings().all()
 
@@ -441,11 +517,6 @@ def set_review_pending(student_id: int) -> None:
 
 
 def mark_student_reviewed(student_id: int, reviewed_by: str | None = None) -> None:
-    """Mark student as done with review.
-
-    Sets status='processed', review_status='done', reviewed_by, reviewed_at.
-    reviewed_by — логин куратора (для статистики «кто сколько сделал»).
-    """
     from datetime import datetime as _dt
     with get_engine().begin() as conn:
         values = {
@@ -461,23 +532,6 @@ def mark_student_reviewed(student_id: int, reviewed_by: str | None = None) -> No
 
 
 def reset_unfinished_students_in_cohort(cohort_id: int) -> int:
-    """Reset NON-finished students in a cohort back to 'pending' for reprocessing.
-
-    Сбрасываются:
-      - status='error'      — упавшие (старый статус, на всякий случай);
-      - status='processing' — застрявшие (обработка прервана на середине);
-      - status='requires_review' С error_message — упавшие, которые fixes13
-        переводит в review с сообщением об ошибке (LLM JSON error, SSL, и т.п.).
-
-    НЕ трогаются:
-      - status='processed'  — успешно обработано;
-      - status='requires_review' БЕЗ error_message — нормальная ручная проверка
-        (вариант/визуальная задача), её должен сделать куратор;
-      - status='unreadable' — битый PDF (повторная обработка не поможет).
-
-    Возвращает число сброшенных. Также возвращает когорту в 'pending', если
-    она была done / done_with_errors.
-    """
     from sqlalchemy import or_, and_
     with get_engine().begin() as conn:
         res = conn.execute(
@@ -503,17 +557,11 @@ def reset_unfinished_students_in_cohort(cohort_id: int) -> int:
         return res.rowcount or 0
 
 
-# Обратная совместимость со старым именем (fixes12 UI).
 def reset_failed_students_in_cohort(cohort_id: int) -> int:
     return reset_unfinished_students_in_cohort(cohort_id)
 
 
 def list_failed_students_in_cohort(cohort_id: int) -> list:
-    """Студенты когорты, которые НЕ обработались как надо (есть проблема).
-
-    Включает: status='error', status='processing' (застрявшие), и
-    status='requires_review' С error_message (упавшие, переведённые в review).
-    """
     from sqlalchemy import or_, and_
     with get_engine().connect() as conn:
         return list(
@@ -535,7 +583,6 @@ def list_failed_students_in_cohort(cohort_id: int) -> list:
 
 
 def count_unfinished_in_cohort(cohort_id: int) -> int:
-    """Сколько в когорте незавершённых работ (error/processing/pending/req-review-с-ошибкой)."""
     from sqlalchemy import or_, and_, func
     with get_engine().connect() as conn:
         row = conn.execute(
@@ -552,12 +599,9 @@ def count_unfinished_in_cohort(cohort_id: int) -> int:
             )
         ).scalar()
     return int(row or 0)
-def find_student_by_file(cohort_id: int, gdrive_file_id: str):
-    """Найти студента в когорте по Drive-file-id. None если не найден.
 
-    Используется для дедупликации при повторном Scan & Import — без этой
-    проверки повторный импорт создаёт дубли для каждого PDF.
-    """
+
+def find_student_by_file(cohort_id: int, gdrive_file_id: str):
     with get_engine().connect() as conn:
         return conn.execute(
             select(students_t)
@@ -568,13 +612,6 @@ def find_student_by_file(cohort_id: int, gdrive_file_id: str):
 
 
 def reactivate_cohort(cohort_id: int) -> None:
-    """Вернуть soft-удалённую когорту обратно в проект (in_project=1).
-
-    Используется в drive_walker.scan_and_import_root: если при повторном
-    Scan находится существующая когорта с тем же ключом, но кто-то её ранее
-    удалил кнопкой 🗑️, мы возвращаем её — пользователь явно повторно
-    импортировал ту же папку, значит хочет её снова видеть.
-    """
     with get_engine().begin() as conn:
         conn.execute(
             update(cohorts).where(cohorts.c.id == cohort_id).values(in_project=1)
@@ -585,11 +622,7 @@ def reset_student_for_reprocessing(student_id: int) -> None:
     """Полностью очистить студента, чтобы его прогнали через ИИ заново.
 
     Удаляет все task_results, сбрасывает status='pending', обнуляет
-    error_message и review_status. detected_variant НЕ трогаем — куратор
-    мог его вручную выставить, и мы хотим прогон именно с этим вариантом.
-
-    Используется в Review Panel после ручного выбора варианта: «Применить
-    вариант и переотправить ученика на проверку».
+    error_message и review_status. detected_variant НЕ трогаем.
     """
     with get_engine().begin() as conn:
         conn.execute(
@@ -603,13 +636,6 @@ def reset_student_for_reprocessing(student_id: int) -> None:
 
 
 def set_student_reviewer(student_id: int, reviewed_by: str) -> None:
-    """Проставить reviewed_by/reviewed_at студенту (без смены статуса).
-
-    Используется queue_processor для авто-обработанных (processed) работ —
-    засчитать их куратору, запустившему обработку. НЕ перезаписывает, если
-    студента уже отметил кто-то вручную? — перезаписывает: последний, кто
-    «коснулся» работы, и есть текущий ответственный.
-    """
     if not reviewed_by:
         return
     from datetime import datetime as _dt
@@ -622,7 +648,6 @@ def set_student_reviewer(student_id: int, reviewed_by: str) -> None:
 
 
 def stamp_reviewer_by_result(result_id: int, reviewed_by: str) -> None:
-    """По id задачи (task_results.id) найти студента и проставить reviewed_by/at."""
     if not reviewed_by:
         return
     from datetime import datetime as _dt
@@ -639,34 +664,33 @@ def stamp_reviewer_by_result(result_id: int, reviewed_by: str) -> None:
         )
 
 
-def get_review_stats(date_from: str | None = None, date_to: str | None = None) -> list[dict]:
-    """Статистика «кто сколько проверил» с разбивкой по типу проверки.
+def get_review_stats(date_from: str | None = None, date_to: str | None = None,
+                     user_id: int | None = None, role: str | None = None) -> list[dict]:
+    """Статистика «кто сколько проверил».
 
-    Для каждого куратора (students.reviewed_by) считаем:
-      - total_reviewed   — всего работ, отмеченных куратором;
-      - manual_reviewed  — из них с РУЧНЫМИ правками баллов
-                           (есть task_results.manually_corrected=1);
-      - ai_accepted      — принято без правок (ИИ-оценка подтверждена) =
-                           total - manual;
-      - last_review      — дата последней проверки.
-
-    Опционально фильтрует по reviewed_at (строки 'YYYY-MM-DD').
+    stage14: для curator можно ограничить статистику его собственными работами
+    (по cohorts.owner_user_id). admin видит всё.
     """
-    from sqlalchemy import func, case, distinct
+    from sqlalchemy import func, case, distinct, or_
     conds = [students_t.c.reviewed_by.isnot(None)]
     if date_from:
         conds.append(students_t.c.reviewed_at >= f"{date_from} 00:00:00")
     if date_to:
         conds.append(students_t.c.reviewed_at <= f"{date_to} 23:59:59")
 
-    # manual = студент, у которого ХОТЯ БЫ одна задача manually_corrected=1
-    manual_case = case(
-        (func.max(task_results.c.manually_corrected) == 1, 1),
-        else_=0,
-    )
+    use_join = False
+    if role != "admin" and user_id is not None:
+        use_join = True
 
     with get_engine().connect() as conn:
-        # Сначала на уровне студента определим manual/auto, потом сгруппируем.
+        sl_select_from = students_t.outerjoin(
+            task_results, task_results.c.student_id == students_t.c.id
+        )
+        if use_join:
+            sl_select_from = sl_select_from.join(
+                cohorts, students_t.c.cohort_id == cohorts.c.id
+            )
+
         student_level = (
             select(
                 students_t.c.reviewed_by.label("reviewed_by"),
@@ -674,15 +698,19 @@ def get_review_stats(date_from: str | None = None, date_to: str | None = None) -
                 students_t.c.reviewed_at.label("reviewed_at"),
                 func.coalesce(func.max(task_results.c.manually_corrected), 0).label("is_manual"),
             )
-            .select_from(
-                students_t.outerjoin(
-                    task_results, task_results.c.student_id == students_t.c.id
+            .select_from(sl_select_from)
+            .where(*conds)
+        )
+        if use_join:
+            student_level = student_level.where(
+                or_(
+                    cohorts.c.owner_user_id == user_id,
+                    cohorts.c.owner_user_id.is_(None),
                 )
             )
-            .where(*conds)
-            .group_by(students_t.c.id, students_t.c.reviewed_by, students_t.c.reviewed_at)
-            .subquery()
-        )
+        student_level = student_level.group_by(
+            students_t.c.id, students_t.c.reviewed_by, students_t.c.reviewed_at
+        ).subquery()
 
         rows = conn.execute(
             select(
@@ -710,7 +738,6 @@ def get_review_stats(date_from: str | None = None, date_to: str | None = None) -
 
 
 def get_reviewed_students(date_from: str | None = None, date_to: str | None = None) -> list[dict]:
-    """Список проверенных студентов (для детализации / графика по дням)."""
     conds = [students_t.c.reviewed_by.isnot(None)]
     if date_from:
         conds.append(students_t.c.reviewed_at >= f"{date_from} 00:00:00")
@@ -729,15 +756,12 @@ def get_reviewed_students(date_from: str | None = None, date_to: str | None = No
 
 
 def clear_student_error(student_id: int) -> None:
-    """Обнулить error_message студента (после успешного retry)."""
     with get_engine().begin() as conn:
         conn.execute(
             update(students_t)
             .where(students_t.c.id == student_id)
             .values(error_message=None)
         )
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -786,12 +810,6 @@ def save_manual_task_result(
     reviewed_by: str | None = None,
     recognized_answer: str = "(manual)",
 ) -> None:
-    """Upsert ручной проверки задачи.
-
-    Ставит confidence='high', manually_corrected=1. recognized_answer —
-    ответ ученика, который ввёл куратор (по нему ИИ уже посчитал балл).
-    Используется при ручной проверке (в т.ч. упавших работ).
-    """
     stmt = _dialect_insert(task_results).values(
         student_id=student_id, task_number=task_number,
         page_number=page_number, recognized_answer=recognized_answer,
@@ -824,19 +842,6 @@ def get_task_results(student_id: int) -> list:
             .where(task_results.c.student_id == student_id)
             .order_by(task_results.c.task_number)
         ).mappings().all()
-
-
-def _stamp_student_reviewer(student_id, reviewed_by):
-    """Helper: stamp who manually edited a task result (for curator stats)."""
-    if not reviewed_by:
-        return
-    from datetime import datetime as _dt
-    with get_engine().begin() as conn:
-        conn.execute(
-            update(students_t).where(students_t.c.id == student_id).values(
-                reviewed_by=reviewed_by, reviewed_at=_dt.utcnow(),
-            )
-        )
 
 
 def update_task_result(

@@ -1,19 +1,15 @@
-"""Review Panel — v5 (fixes14).
+"""Review Panel — v6 (stage14).
 
-Что нового по сравнению с v3 (fixes13):
-- Каскадные фильтры в шапке: Sector → Grade → School → Teacher.
-  Каждый куратор может выбрать «свою» подвыборку. На каждом уровне
-  доступен вариант «All» — например, школа выбрана, а учитель «All»
-  означает «все учителя этой школы».
-- Расширенный bbox: добавляется padding 3% по горизонтали и 4% по вертикали
-  перед обрезкой. Куратор почти всегда видит шапку «№ N» и поле ответа,
-  даже если LLM был не очень точен.
-- Кнопка «📄 Show full page» под каждой задачей — если обрезка всё-таки
-  промахнулась, куратор одним кликом раскрывает весь скан страницы.
-- Счётчик отфильтрованных студентов в шапке.
-
-Остальное (кнопки Correct/Incorrect, number_input, error_message, ФИО)
-сохранено из fixes13.
+stage14:
+- Используется list_requires_review_for_user — куратор видит только свои
+  работы. admin видит все.
+- В блоке «выбери вариант вручную»:
+    • кнопка «Apply variant & re-grade» ТЕПЕРЬ САМА запускает queue_processor
+      (раньше требовалось руками идти в Cohort Queue и жать Start);
+    • добавлен переключатель «🔄 Скан перевёрнут на 180°» — куратор отмечает
+      сканы вверх ногами, и после Apply страница рендерится повернутой.
+- В блоке полной ручной оценки — тот же переключатель «вверх ногами», +
+  все страницы при просмотре уже учитывают флаг rotate_180.
 """
 import base64
 import io
@@ -30,9 +26,11 @@ import src.scorer as scorer
 import src.auth as auth
 import src.pdf_processor as pdf_processor
 import src.drive_walker as drive_walker
+import src.queue_processor as queue_processor
 
 # Защита: страница доступна только залогиненным пользователям.
 auth.require_login()
+_CU = auth.current_user() or {}
 
 
 # ---------------------------------------------------------------------------
@@ -65,26 +63,14 @@ def is_visual_task(task_criteria: dict) -> bool:
     return not partial
 
 
-def score_step_for_task(task_criteria: dict) -> float:
-    tier_scores = sorted({float(t.get("score", 0)) for t in task_criteria.get("tiers", [])})
-    diffs = [
-        tier_scores[i + 1] - tier_scores[i]
-        for i in range(len(tier_scores) - 1)
-        if tier_scores[i + 1] - tier_scores[i] > 0
-    ]
-    return min(diffs) if diffs else 1.0
-
-
 def apply_manual_score(result_id: int, recognized_answer: str, new_score: float) -> None:
     db.update_task_result(
         result_id, recognized_answer or "", float(new_score),
         manually_corrected=True,
     )
-    # Отметить, кто из кураторов правил балл (для Curator Stats).
-    _cu = auth.current_user()
-    if _cu:
+    if _CU.get("username"):
         try:
-            db.stamp_reviewer_by_result(result_id, _cu["username"])
+            db.stamp_reviewer_by_result(result_id, _CU["username"])
         except AttributeError:
             pass
 
@@ -104,18 +90,14 @@ def display_name_for_student(student: dict) -> str:
     return f"Student {student.get('id', '?')}"
 
 
-# --- bbox crop with padding ---
+# --- bbox crop с padding (учитывает rotate_180) ---
 
-# Padding в долях страницы — добавляется к bbox перед обрезкой, чтобы куратор
-# гарантированно видел шапку «№ N» сверху, но НЕ захватывал кусок
-# следующей задачи снизу.
 _BBOX_PADDING_X = 0.03
-_BBOX_PADDING_TOP = 0.06       # больше — захватывает заголовок «№ N» / «6 б.»
-_BBOX_PADDING_BOTTOM = 0.01    # меньше — чтобы не вылезать на следующую задачу
+_BBOX_PADDING_TOP = 0.06
+_BBOX_PADDING_BOTTOM = 0.01
 
 
 def crop_image_by_bbox(img_bytes: bytes, bbox_json: str | None) -> bytes:
-    """Crop image by normalized bbox (with padding). Returns original on any issue."""
     if not bbox_json:
         return img_bytes
     try:
@@ -127,7 +109,6 @@ def crop_image_by_bbox(img_bytes: bytes, bbox_json: str | None) -> bytes:
     if x2 <= x1 or y2 <= y1:
         return img_bytes
 
-    # Расширяем bbox padding'ом (сверху больше, снизу почти нет).
     x1 = max(0.0, x1 - _BBOX_PADDING_X)
     y1 = max(0.0, y1 - _BBOX_PADDING_TOP)
     x2 = min(1.0, x2 + _BBOX_PADDING_X)
@@ -147,20 +128,20 @@ def crop_image_by_bbox(img_bytes: bytes, bbox_json: str | None) -> bytes:
     return out.getvalue()
 
 
-def _render_page_top(pdf_path: Path, page_number: int = 1, top_fraction: float = 0.32) -> None:
-    """Показать ТОЛЬКО верхнюю часть страницы (где обычно печатается вариант).
+def _student_rotate_flag(student) -> bool:
+    return bool(student.get("rotate_180") or 0) if hasattr(student, "get") else bool(getattr(student, "rotate_180", 0) or 0)
 
-    top_fraction — доля высоты от верха (0.32 = верхние ~32% страницы).
-    Нужно для выбора варианта в Review Panel: куратор сразу видит шапку
-    работы, не открывая PDF.
-    """
+
+def _render_page_top(pdf_path: Path, page_number: int = 1, top_fraction: float = 0.32,
+                    rotate_180: bool = False) -> None:
+    """Показать ТОЛЬКО верхнюю часть страницы (где обычно печатается вариант)."""
     if not pdf_path or not pdf_path.exists():
         st.caption("Скан недоступен — выбери вариант вручную.")
         return
     try:
         import io as _io
         from PIL import Image as _Image
-        pages = pdf_processor.pdf_to_images(str(pdf_path))
+        pages = pdf_processor.pdf_to_images(str(pdf_path), rotate_180=rotate_180)
         page_entry = next((pp for pp in pages if pp[0] == page_number), None)
         if page_entry is None:
             page_entry = pages[0] if pages else None
@@ -181,13 +162,12 @@ def _render_page_top(pdf_path: Path, page_number: int = 1, top_fraction: float =
 
 
 def _render_task_image(pdf_path: Path, page_number: int, bbox: str | None,
-                       full_page: bool = False) -> None:
-    """Render the page image; if full_page=False and bbox is present, crop."""
+                       full_page: bool = False, rotate_180: bool = False) -> None:
     if not pdf_path.exists():
         st.warning(f"PDF file not found on disk: {pdf_path.name}")
         return
     try:
-        pages = pdf_processor.pdf_to_images(str(pdf_path))
+        pages = pdf_processor.pdf_to_images(str(pdf_path), rotate_180=rotate_180)
         page_entry = next((p for p in pages if p[0] == page_number), None)
         if page_entry is None:
             st.warning(f"Page {page_number} not found in PDF.")
@@ -203,7 +183,7 @@ def _render_task_image(pdf_path: Path, page_number: int, bbox: str | None,
         st.warning(f"Cannot read PDF: {exc}")
 
 
-def _render_low_conf_task(sid, result, task_criteria, pdf_path):
+def _render_low_conf_task(sid, result, task_criteria, pdf_path, rotate_180: bool):
     task_num = result["task_number"]
     page_num = result["page_number"]
     recognized = result.get("recognized_answer") or ""
@@ -213,13 +193,12 @@ def _render_low_conf_task(sid, result, task_criteria, pdf_path):
 
     st.write(f"**Task {task_num}** (Page {page_num})")
 
-    # Кнопка-переключатель «обрезка / вся страница». Состояние хранится в
-    # session_state — на каждую задачу свой ключ.
     full_key = f"fullpage_{sid}_{task_num}"
     full_page = st.session_state.get(full_key, False)
     btn_label = "🔍 Show cropped task" if full_page else "📄 Show full page"
     if pdf_path:
-        _render_task_image(pdf_path, page_num, bbox=bbox, full_page=full_page)
+        _render_task_image(pdf_path, page_num, bbox=bbox, full_page=full_page,
+                          rotate_180=rotate_180)
         if bbox:
             if st.button(btn_label, key=f"toggle_{sid}_{task_num}"):
                 st.session_state[full_key] = not full_page
@@ -231,21 +210,16 @@ def _render_low_conf_task(sid, result, task_criteria, pdf_path):
     if is_visual_task(task_criteria):
         cols = st.columns(2)
         with cols[0]:
-            if st.button(
-                f"✅ Correct ({max_score:g} pts)",
-                key=f"correct_{sid}_{task_num}", use_container_width=True,
-            ):
+            if st.button(f"✅ Correct ({max_score:g} pts)",
+                         key=f"correct_{sid}_{task_num}", use_container_width=True):
                 apply_manual_score(result["id"], recognized, max_score)
                 st.rerun()
         with cols[1]:
-            if st.button(
-                "❌ Incorrect (0 pts)",
-                key=f"incorrect_{sid}_{task_num}", use_container_width=True,
-            ):
+            if st.button("❌ Incorrect (0 pts)",
+                         key=f"incorrect_{sid}_{task_num}", use_container_width=True):
                 apply_manual_score(result["id"], recognized, 0.0)
                 st.rerun()
     else:
-        # Обычная задача: куратор вводит ОТВЕТ УЧЕНИКА, балл считает ИИ (scorer).
         new_answer = st.text_input(
             f"Ответ ученика (Task {task_num})",
             value=recognized,
@@ -254,14 +228,13 @@ def _render_low_conf_task(sid, result, task_criteria, pdf_path):
         )
         if st.button("💾 Сохранить ответ", key=f"save_{sid}_{task_num}"):
             score, notes = scorer.compute_score(new_answer, task_criteria)
-            _cu = auth.current_user()
             db.save_manual_task_result(
                 student_id=sid,
                 task_number=task_num,
                 page_number=page_num,
                 score=float(score),
                 max_score=max_score,
-                reviewed_by=_cu["username"] if _cu else None,
+                reviewed_by=_CU.get("username"),
                 recognized_answer=new_answer,
             )
             st.success(f"Ответ сохранён. ИИ поставил: {score:g} / {max_score:g}")
@@ -270,13 +243,12 @@ def _render_low_conf_task(sid, result, task_criteria, pdf_path):
     st.divider()
 
 
-def _render_all_pages(pdf_path) -> None:
-    """Показать все страницы скана (для полной ручной проверки)."""
+def _render_all_pages(pdf_path, rotate_180: bool) -> None:
     if not pdf_path or not pdf_path.exists():
         st.caption("Скан недоступен на диске.")
         return
     try:
-        pages = pdf_processor.pdf_to_images(str(pdf_path))
+        pages = pdf_processor.pdf_to_images(str(pdf_path), rotate_180=rotate_180)
         for pn, b64 in pages:
             st.image(base64.b64decode(b64), caption=f"Страница {pn}")
     except pdf_processor.UnreadablePDFError as exc:
@@ -284,18 +256,20 @@ def _render_all_pages(pdf_path) -> None:
 
 
 def _render_full_manual_grading(student, cohort, criteria, pdf_path) -> None:
-    """Полная ручная оценка: показать весь скан + поля баллов по всем заданиям.
-
-    Для работ, которые ИИ не смог обработать (упала обработка) — куратор
-    смотрит скан и сам выставляет баллы по каждому заданию из критериев.
-    """
     st.warning(
-        "⚠️ ИИ не смог обработать эту работу автоматически. Проверь её "
-        "вручную: посмотри скан ниже и выстави баллы по заданиям."
+        "⚠️ ИИ не смог обработать эту работу автоматически. Проверь её вручную."
     )
 
+    # Переключатель «скан вверх ногами» — отдельной кнопкой.
+    rot_key = f"rot180_{student['id']}"
+    current = bool(student.get("rotate_180") or 0)
+    rotate_180 = st.toggle("🔄 Скан повернут на 180° (вверх ногами)",
+                           value=current, key=rot_key)
+    if rotate_180 != current:
+        db.update_student_rotation(student["id"], rotate_180)
+
     with st.expander("📄 Показать всю работу (скан)", expanded=True):
-        _render_all_pages(pdf_path)
+        _render_all_pages(pdf_path, rotate_180=rotate_180)
 
     tasks = criteria.get("tasks", [])
     if not tasks:
@@ -306,8 +280,8 @@ def _render_full_manual_grading(student, cohort, criteria, pdf_path) -> None:
 
     st.subheader("Впиши ответы ученика — баллы поставит ИИ")
     st.caption(
-        "Для обычных заданий впиши, что написал ученик — ИИ сравнит с эталоном "
-        "и поставит балл. Для заданий с рисунком выбери «Правильно/Неправильно»."
+        "Для обычных заданий впиши, что написал ученик. Для заданий с рисунком "
+        "выбери «Правильно/Неправильно»."
     )
 
     with st.form(f"manual_grade_{student['id']}"):
@@ -319,7 +293,6 @@ def _render_full_manual_grading(student, cohort, criteria, pdf_path) -> None:
             desc = (t.get("description", "") or "")[:90]
             prev = existing.get(tn, {})
             if is_visual_task(t):
-                # Задача с рисунком — выбор правильно/неправильно.
                 default_idx = 0
                 if prev.get("score") is not None:
                     default_idx = 1 if float(prev.get("score") or 0) >= max_s else (
@@ -343,18 +316,13 @@ def _render_full_manual_grading(student, cohort, criteria, pdf_path) -> None:
         submitted = st.form_submit_button("💾 Сохранить и завершить")
 
     if submitted:
-        _cu = auth.current_user()
-        uname = _cu["username"] if _cu else None
+        uname = _CU.get("username")
         for t in tasks:
             tn = t["task_number"]
             max_s = float(t.get("max_score", 0))
             if is_visual_task(t):
                 choice = visual_choices.get(tn, "Не проверено")
-                if choice == "Правильно":
-                    score = max_s
-                else:
-                    # «Неправильно» и «Не проверено» → 0.
-                    score = 0.0
+                score = max_s if choice == "Правильно" else 0.0
                 db.save_manual_task_result(
                     student_id=student["id"], task_number=tn, page_number=1,
                     score=score, max_score=max_s, reviewed_by=uname,
@@ -385,66 +353,60 @@ def _render_student(student, cohort) -> None:
         err = (student.get("error_message") or "").strip()
         if err:
             st.error(f"⚠️ Processing error: {err}")
-            st.caption(
-                "Чтобы перезапустить обработку — в Cohort Queue нажми кнопку 🔄 "
-                "у этой когорты, потом ▶️ Start Processing. После успешной "
-                "обработки эта пометка исчезнет автоматически."
-            )
+
+        rotate_180 = bool(student.get("rotate_180") or 0)
 
         if not should_show_task_edits(student):
-            st.warning(
-                "🔢 ИИ не смог определить вариант теста. Посмотри на верх работы "
-                "ниже и выбери вариант вручную."
-            )
-            # Показать верхнюю часть скана, чтобы не открывать PDF.
+            st.warning("🔢 ИИ не смог определить вариант теста. Выбери вручную.")
+
             try:
                 _pdf_path_v = resolve_pdf_path(
                     cohort_id=cohort["id"], filename=student["filename"],
                 )
             except (ValueError, KeyError):
                 _pdf_path_v = None
-            _render_page_top(_pdf_path_v, page_number=1, top_fraction=0.32)
+
+            # Переключатель «скан вверх ногами» — ставим ДО просмотра, чтобы
+            # куратор сразу увидел корректный скан.
+            rot_key = f"rot180_variant_{student['id']}"
+            rotate_180 = st.toggle(
+                "🔄 Скан повернут на 180° (вверх ногами)",
+                value=rotate_180, key=rot_key,
+            )
+            if rotate_180 != bool(student.get("rotate_180") or 0):
+                db.update_student_rotation(student["id"], rotate_180)
+
+            _render_page_top(_pdf_path_v, page_number=1, top_fraction=0.32,
+                            rotate_180=rotate_180)
 
             variant = st.selectbox(
-                "Select test variant", [1, 2],
-                key=f"variant_{student['id']}",
+                "Select test variant", [1, 2], key=f"variant_{student['id']}",
             )
             cols = st.columns(2)
             with cols[0]:
                 if st.button("✅ Apply variant & re-grade",
                              key=f"apply_variant_{student['id']}",
-                             help=(
-                                 "Сохранит выбранный вариант, очистит "
-                                 "предыдущие баллы и поставит ученика "
-                                 "обратно в очередь — нажми Start Processing "
-                                 "в Cohort Queue, чтобы ИИ прогнал работу "
-                                 "заново уже с правильным вариантом."
-                             )):
+                             help="Сохранит вариант, очистит баллы и СРАЗУ "
+                                  "запустит ИИ заново на эту работу."):
                     db.update_student_variant(student["id"], variant)
                     try:
                         db.reset_student_for_reprocessing(student["id"])
                     except AttributeError:
-                        # Старый db без хелпера — хоть status сбросим
                         db.update_student_status(student["id"], "pending")
+                    # stage14: автозапуск очереди — куратору больше не надо
+                    # вручную идти в Cohort Queue и жать Start.
+                    queue_processor.start(started_by=_CU.get("username"))
                     st.success(
-                        f"Variant {variant} applied. Student re-queued. "
-                        "Open Cohort Queue and press ▶️ Start Processing."
+                        f"Variant {variant} применён. ИИ начал переобработку "
+                        "автоматически — обнови через минуту."
                     )
                     st.rerun()
             with cols[1]:
                 if st.button("Just save variant (no re-grade)",
                              key=f"apply_variant_only_{student['id']}",
-                             help=(
-                                 "Просто сохранить вариант без переотправки на "
-                                 "проверку — используй, если уже есть баллы и "
-                                 "ты не хочешь их потерять."
-                             )):
+                             help="Просто сохранить вариант без переобработки."):
                     db.update_student_variant(student["id"], variant)
                     st.rerun()
-            st.info(
-                "Select a test variant. **Apply variant & re-grade** запустит "
-                "ИИ заново — рекомендуется, иначе у работы не будет баллов."
-            )
             return
 
         detected_variant = student["detected_variant"]
@@ -471,9 +433,6 @@ def _render_student(student, cohort) -> None:
 
         task_results = db.get_task_results(student["id"])
 
-        # РЕЖИМ ПОЛНОЙ РУЧНОЙ ОЦЕНКИ — для упавших работ (есть error_message)
-        # или работ, где ИИ не создал ни одного результата. Куратор видит весь
-        # скан и сам выставляет баллы по всем заданиям.
         if err or not task_results:
             _render_full_manual_grading(student, cohort, criteria, pdf_path)
             return
@@ -486,13 +445,12 @@ def _render_student(student, cohort) -> None:
             for result in low_conf_results:
                 r = dict(result)
                 tc = tasks_criteria.get(r["task_number"], {})
-                _render_low_conf_task(student["id"], r, tc, pdf_path)
+                _render_low_conf_task(student["id"], r, tc, pdf_path,
+                                     rotate_180=rotate_180)
 
         if st.button("✅ Mark as Done", key=f"done_{student['id']}"):
-            _cu = auth.current_user()
             db.mark_student_reviewed(
-                student["id"],
-                reviewed_by=_cu["username"] if _cu else None,
+                student["id"], reviewed_by=_CU.get("username"),
             )
             st.rerun()
 
@@ -505,29 +463,17 @@ _LANG_LABEL = {"ru": "Ру сектор", "az": "Аз сектор"}
 
 
 def _apply_filters(students, cohort_map):
-    """Render filter widgets and return the filtered student list.
-
-    Каскад: Sector → Grade → School → Teacher. На каждом уровне доступен
-    «All». Каждое последующее меню формируется по уже отфильтрованному
-    набору, чтобы не показывать пустых вариантов.
-    """
     if not students:
         return students
 
-    # All cohorts that have students requiring review.
-    cohorts_in_play = [
-        cohort_map[s["cohort_id"]] for s in students
-    ]
-
-    def options(field):
-        return sorted({c[field] for c in cohorts_in_play if c.get(field) is not None})
+    cohorts_in_play = [cohort_map[s["cohort_id"]] for s in students]
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        sectors = sorted({c["language"] for c in cohorts_in_play if c.get("language")})
         sector_choice = st.selectbox(
-            "Sector",
-            ["All"] + [_LANG_LABEL.get(s, s) for s in options("language")],
+            "Sector", ["All"] + [_LANG_LABEL.get(s, s) for s in sectors],
             key="filter_sector",
         )
     sector_value = None
@@ -536,8 +482,6 @@ def _apply_filters(students, cohort_map):
             if lbl == sector_choice:
                 sector_value = code
                 break
-        if sector_value is None:
-            sector_value = sector_choice
 
     after_sector = [
         c for c in cohorts_in_play
@@ -547,18 +491,12 @@ def _apply_filters(students, cohort_map):
     with col2:
         grade_options = sorted({c["grade"] for c in after_sector})
         grade_choice = st.selectbox(
-            "Grade",
-            ["All"] + [f"{g} класс" for g in grade_options],
+            "Grade", ["All"] + [f"{g} класс" for g in grade_options],
             key="filter_grade",
         )
-    grade_value = None
-    if grade_choice != "All":
-        grade_value = int(grade_choice.split()[0])
+    grade_value = int(grade_choice.split()[0]) if grade_choice != "All" else None
 
-    after_grade = [
-        c for c in after_sector
-        if grade_value is None or c["grade"] == grade_value
-    ]
+    after_grade = [c for c in after_sector if grade_value is None or c["grade"] == grade_value]
 
     with col3:
         school_options = sorted({c["school"] for c in after_grade})
@@ -590,19 +528,24 @@ def _apply_filters(students, cohort_map):
 
 st.title("Review Panel")
 
-students_to_review = db.list_requires_review()
+if _CU.get("role") == "admin":
+    st.caption("👑 Ты admin — видишь работы всех кураторов.")
+else:
+    st.caption("Видны только твои работы.")
+
+students_to_review = db.list_requires_review_for_user(
+    _CU.get("id"), _CU.get("role"),
+)
 
 if not students_to_review:
     st.info("No students currently require review. All caught up!")
 else:
-    # Build cohort_map once
     cohort_map = {}
     for student in students_to_review:
         cid = student["cohort_id"]
         if cid not in cohort_map:
             cohort_map[cid] = dict(db.get_cohort(cid))
 
-    # Filters
     st.caption("**Filters** — narrow down which students you review:")
     filtered_students = _apply_filters(students_to_review, cohort_map)
 
@@ -615,7 +558,6 @@ else:
     if not filtered_students:
         st.info("No students match the current filter.")
     else:
-        # Group by cohort and render in stable order
         cohort_ids_seen = []
         for student in filtered_students:
             cid = student["cohort_id"]

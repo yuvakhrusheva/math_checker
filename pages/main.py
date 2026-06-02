@@ -1,21 +1,11 @@
-"""Main screen (Cohort Queue) — v4 (fixes15).
+"""Main screen (Cohort Queue) — v5 (stage14).
 
-Двухэтапный импорт:
-  1) Куратор вставляет URL корневой папки и нажимает «🔍 Browse folder
-     structure». Это быстро — система проходит дерево ДО уровня учителей
-     (без захода в PDF) и складывает доступные секторы / классы / школы /
-     учителей в session_state.
-  2) Появляются 4 каскадных дропдауна. Куратор выбирает «свою» подветку
-     (или оставляет «All» где-то). Нажимает «📥 Import selected» — система
-     обходит ТОЛЬКО выбранную часть дерева и создаёт когорты + студентов.
-
-Это нужно, чтобы:
-  - каждый куратор работал со своим набором (по сектору / классу / школе /
-    учителю), не плодя лишние когорты в общей БД;
-  - случайно не залить весь объём, когда нужна только одна школа.
-
-Также fixes15 убирает старый баг «116 PDF вместо 32» — теперь повторный
-Scan дедуплицирует студентов по gdrive_file_id (см. drive_walker).
+stage14:
+- Используется list_cohorts_for_user — куратор видит только свои когорты
+  (admin видит всё).
+- При импорте прокидывается owner_user_id текущего пользователя — все
+  созданные когорты получают его как владельца.
+- Manual single-folder add тоже привязывает когорту к текущему юзеру.
 """
 from datetime import date as _date
 
@@ -30,6 +20,7 @@ import src.auth as auth
 
 # Защита: страница доступна только залогиненным пользователям.
 auth.require_login()
+_CU = auth.current_user() or {}
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +38,6 @@ def should_disable_start_button():
 
 
 def try_browse_root(gdrive_url: str):
-    """Phase 1: walk down to teacher folders only, return TeacherEntry list."""
     err = validate_gdrive_url(gdrive_url)
     if err:
         return None, err
@@ -66,11 +56,7 @@ def try_browse_root(gdrive_url: str):
     return {"root_id": root_id, "url": gdrive_url, "entries": entries}, None
 
 
-def try_import_selected(
-    gdrive_url: str,
-    filters: dict,
-    progress_callback=None,
-):
+def try_import_selected(gdrive_url: str, filters: dict, progress_callback=None):
     err = validate_gdrive_url(gdrive_url)
     if err:
         return None, err
@@ -87,6 +73,7 @@ def try_import_selected(
             service, root_id, root_folder_url=gdrive_url,
             progress_callback=progress_callback,
             filters=filters,
+            owner_user_id=_CU.get("id"),
         )
     except Exception as exc:
         return None, f"Import failed: {exc}"
@@ -121,6 +108,7 @@ def try_add_cohort(
         school=school, teacher=teacher, class_number=class_number,
         class_letter=class_letter, language=language,
         test_date=str(test_date), grade=grade,
+        owner_user_id=_CU.get("id"),
     )
     for pdf in pdfs:
         existing = db.find_student_by_file(cohort_id, pdf["id"])
@@ -130,7 +118,7 @@ def try_add_cohort(
 
 
 # ---------------------------------------------------------------------------
-# UI helpers
+# UI
 # ---------------------------------------------------------------------------
 
 _STATUS_LABELS = {
@@ -146,7 +134,7 @@ _SECTOR_LABEL = {"ru": "Ру сектор", "az": "Аз сектор"}
 
 def _render_cohort_table(cohorts):
     if not cohorts:
-        st.info("No cohorts in queue. Add one below.")
+        st.info("У тебя пока нет когорт. Импортируй их через форму ниже.")
         return
     for cohort in cohorts:
         students = db.list_students_by_cohort(cohort["id"])
@@ -156,9 +144,7 @@ def _render_cohort_table(cohorts):
             if s["status"] in ("processed", "requires_review", "unreadable", "error")
         )
         status_label = _STATUS_LABELS.get(cohort["status"], cohort["status"])
-        # Незавершённые = error / processing / pending / requires_review-с-ошибкой.
         n_unfinished = db.count_unfinished_in_cohort(cohort["id"])
-        # Проблемные (есть сообщение/застряли) — для отдельного предупреждения.
         failed = db.list_failed_students_in_cohort(cohort["id"])
         status_display = (
             f"{status_label} ({n_unfinished}⏳)" if n_unfinished else status_label
@@ -180,23 +166,15 @@ def _render_cohort_table(cohorts):
                 if st.button("🗑️", key=f"del_{cohort['id']}", help="Delete"):
                     db.update_cohort_metadata(cohort["id"], in_project=0)
                     st.rerun()
-            # Кнопка перезапуска — когда есть незавершённые работы и
-            # обработчик сейчас не занят.
             if n_unfinished > 0 and not queue_processor.is_running():
                 if st.button("🔄", key=f"retry_{cohort['id']}",
-                             help=f"Сбросить {n_unfinished} незавершённых работ "
-                                  "в очередь и вернуть когорту в pending"):
+                             help=f"Сбросить {n_unfinished} незавершённых работ"):
                     n = db.reset_unfinished_students_in_cohort(cohort["id"])
-                    st.success(
-                        f"{n} работ сброшено в очередь, когорта снова pending. "
-                        "Нажми ▶️ Start Processing."
-                    )
+                    st.success(f"{n} работ сброшено в очередь. Нажми ▶️ Start Processing.")
                     st.rerun()
 
         if failed:
-            with st.expander(
-                f"⚠️ {len(failed)} работ с проблемами — посмотреть, что не так"
-            ):
+            with st.expander(f"⚠️ {len(failed)} работ с проблемами"):
                 for s in failed:
                     msg = s["error_message"] or f"застряла в статусе «{s['status']}»"
                     st.write(f"- **{s['filename']}**: {msg}")
@@ -232,20 +210,16 @@ def _render_edit_form(cohort):
             st.rerun()
 
 
-# ---------------------------------------------------------------------------
 # Root import — two-phase: Browse, then Import selected
-# ---------------------------------------------------------------------------
-
 _BROWSE_KEY = "root_import_browse_data"
 
 
 def _render_root_import_form():
     with st.expander("📁 Import from root folder (auto-detect cohorts)", expanded=True):
         st.caption(
-            "**Шаг 1.** Вставь ссылку на корневую папку и нажми «Browse» — система "
-            "найдёт доступные секторы, классы, школы и учителей. **Шаг 2.** Выбери, "
-            "что именно ты хочешь проверять (или «All» — на все). Только эта подветка "
-            "будет добавлена в очередь."
+            "**Шаг 1.** Вставь ссылку на корневую папку и нажми «Browse». "
+            "**Шаг 2.** Выбери, что именно ты хочешь проверять. Импортированные "
+            "когорты будут видны только тебе (если ты не admin)."
         )
 
         root_url = st.text_input(
@@ -258,16 +232,13 @@ def _render_root_import_form():
         browse_col, reset_col = st.columns([1, 1])
         with browse_col:
             if st.button("🔍 Browse folder structure"):
-                with st.spinner("Walking Drive folder structure (down to teacher level)…"):
+                with st.spinner("Walking Drive folder structure…"):
                     data, error = try_browse_root(root_url)
                 if error:
                     st.error(error)
                 else:
                     if not data["entries"]:
-                        st.warning(
-                            "Browse finished, but no recognizable teacher folders "
-                            "were found. Check folder structure and service-account access."
-                        )
+                        st.warning("No teacher folders found. Check structure / access.")
                     st.session_state[_BROWSE_KEY] = data
                     st.rerun()
         with reset_col:
@@ -285,13 +256,11 @@ def _render_root_import_form():
 
         st.success(f"Found {len(entries)} teacher folders. Pick what to import:")
 
-        # Cascading filters
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             sectors = sorted({e.language for e in entries})
             sector_choice = st.selectbox(
-                "Sector",
-                ["All"] + [_SECTOR_LABEL.get(s, s) for s in sectors],
+                "Sector", ["All"] + [_SECTOR_LABEL.get(s, s) for s in sectors],
                 key="import_sector",
             )
         sector_value = None
@@ -302,12 +271,10 @@ def _render_root_import_form():
                     break
 
         after_s = [e for e in entries if sector_value is None or e.language == sector_value]
-
         with c2:
             grades = sorted({e.grade for e in after_s})
             grade_choice = st.selectbox(
-                "Grade", ["All"] + [f"{g} класс" for g in grades],
-                key="import_grade",
+                "Grade", ["All"] + [f"{g} класс" for g in grades], key="import_grade",
             )
         grade_value = int(grade_choice.split()[0]) if grade_choice != "All" else None
         after_g = [e for e in after_s if grade_value is None or e.grade == grade_value]
@@ -328,35 +295,29 @@ def _render_root_import_form():
         teacher_value = None if teacher_choice == "All" else teacher_choice
         after_t = [e for e in after_sc if teacher_value is None or e.teacher == teacher_value]
 
-        st.caption(
-            f"**Selection:** {len(after_t)} teacher folders match. They will "
-            "become cohorts after Import."
-        )
+        st.caption(f"**Selection:** {len(after_t)} teacher folders match.")
 
         if st.button("📥 Import selected"):
             if not after_t:
-                st.warning("Nothing to import — selection is empty.")
+                st.warning("Nothing to import.")
                 return
             filters = {
-                "sector": sector_value,
-                "grade": grade_value,
-                "school": school_value,
-                "teacher": teacher_value,
+                "sector": sector_value, "grade": grade_value,
+                "school": school_value, "teacher": teacher_value,
             }
             status_box = st.status("Starting import…", expanded=True)
 
             def on_progress(stage: str, current: int, total: int) -> None:
                 if stage == "walking":
-                    status_box.update(label=f"🔍 Walking selected branch… ({current} items)")
+                    status_box.update(label=f"🔍 Walking… ({current})")
                 elif stage == "saving":
                     if current < total:
-                        status_box.update(label=f"💾 Saving to DB — {current}/{total}…")
+                        status_box.update(label=f"💾 Saving — {current}/{total}…")
                     else:
-                        status_box.update(label=f"💾 Saved {total} items to DB ✓")
+                        status_box.update(label=f"💾 Saved {total} ✓")
 
             summary, error = try_import_selected(
-                browse_data["url"], filters=filters,
-                progress_callback=on_progress,
+                browse_data["url"], filters=filters, progress_callback=on_progress,
             )
             if error:
                 status_box.update(label="❌ Import failed", state="error")
@@ -367,10 +328,10 @@ def _render_root_import_form():
                 f"Created {summary.cohorts_created} cohorts, "
                 f"{summary.students_created} students. "
                 f"Skipped {summary.students_skipped_dupes} duplicates. "
-                f"{summary.students_flagged_for_review} flagged for manual review."
+                f"{summary.students_flagged_for_review} flagged for review."
             )
             if summary.errors:
-                with st.expander(f"⚠️ {len(summary.errors)} issues during import"):
+                with st.expander(f"⚠️ {len(summary.errors)} issues"):
                     for line in summary.errors:
                         st.write(f"- {line}")
             st.rerun()
@@ -407,7 +368,8 @@ def _render_add_form():
 
 @st.fragment(run_every=2)
 def _render_progress():
-    cohorts = db.list_cohorts()
+    # Прогресс смотрим по своим когортам (для admin — по всем).
+    cohorts = db.list_cohorts_for_user(_CU.get("id"), _CU.get("role"))
     processing = [c for c in cohorts if c["status"] == "processing"]
     if not processing:
         st.caption("No cohorts currently processing.")
@@ -432,6 +394,11 @@ def _render_progress():
 
 st.title("Cohort Queue")
 
+if _CU.get("role") == "admin":
+    st.caption("👑 Ты admin — видишь все когорты всех кураторов.")
+else:
+    st.caption("Видны только твои когорты. Когорты других кураторов скрыты.")
+
 hdr = st.columns([2, 1, 1, 1, 1, 2, 1, 1])
 hdr[0].write("**School**")
 hdr[1].write("**Class**")
@@ -444,7 +411,10 @@ hdr[7].write("**Actions**")
 
 st.divider()
 
-cohorts = [c for c in db.list_cohorts() if c["in_project"]]
+cohorts = [
+    c for c in db.list_cohorts_for_user(_CU.get("id"), _CU.get("role"))
+    if c["in_project"]
+]
 _render_cohort_table(cohorts)
 
 st.divider()
@@ -456,20 +426,15 @@ st.divider()
 start_col, stop_col, status_col = st.columns([1, 1, 3])
 with start_col:
     if st.button("▶️ Start Processing", disabled=should_disable_start_button()):
-        _cu = auth.current_user()
-        queue_processor.start(started_by=_cu["username"] if _cu else None)
+        queue_processor.start(started_by=_CU.get("username"))
         st.success("Processing started.")
         st.rerun()
 with stop_col:
     if st.button("⏹ Stop Processing",
                  disabled=not queue_processor.is_running(),
-                 help="Signals the queue to stop after the current student finishes"):
+                 help="Останавливает обработку после текущего ученика"):
         queue_processor.force_reset()
-        st.warning(
-            "Stop requested. Текущий ученик доидёт до конца (LLM-вызов нельзя "
-            "оборвать на середине), потом обработчик остановится. "
-            "Через 10-30 секунд снова сможешь нажать ▶️ Start Processing."
-        )
+        st.warning("Stop requested. Через 10-30 сек снова сможешь нажать ▶️.")
         st.rerun()
 with status_col:
     if queue_processor.is_running():

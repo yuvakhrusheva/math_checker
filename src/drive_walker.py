@@ -1,25 +1,20 @@
-"""Recursive walk of the root Drive folder + automatic cohort creation (v5 / fixes20).
+"""Recursive walk of the root Drive folder + automatic cohort creation — v5 (stage14).
 
-Что изменилось по сравнению с v4 (fixes15):
-- Полностью удалена функциональность перевода ФИО на русский. Имена
-  сохраняются в БД ровно так, как написано в имени PDF-файла
-  («Abbaszadə Nəzrin» останется «Abbaszadə Nəzrin»). Это упрощает код,
-  убирает лишний LLM-вызов и связанную с ним нагрузку.
-- Параметр `skip_translation`, поле `names_translated` в ImportSummary и
-  фаза `translating` в progress_callback — удалены.
-
-Иерархия (без изменений):
-    Root
-    ├── Аз сектор / Ру сектор          → language
-    │   ├── 2 класс / 3 класс          → grade
-    │   │   ├── <teacher folder>       → school + teacher + in_project
-    │   │   │   ├── <Student Name Nb>.pdf   → student_name + class
+stage14:
+- scan_and_import_root принимает owner_user_id и прокидывает его в
+  db.create_cohort. Когорта получает владельца, который сделал импорт.
+- Если когорта уже существует и владелец не выставлен (legacy) — мы
+  выставляем его текущему импортёру при «реактивации».
+- Перевод имён (translate_names_batch) убран в fixes20; здесь сохранён
+  только needs_translation и парсеры, без LLM-вызовов.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 import src.db as db
@@ -95,6 +90,14 @@ def parse_student_filename(filename: str) -> tuple[str, int, str]:
     return name, num, letter
 
 
+# fixes20: translation removed — функция оставлена no-op для совместимости.
+_NON_RUSSIAN_RE = re.compile(r"[A-Za-zƏəÜüÖöÇçŞşĞğıİ]")
+
+
+def needs_translation(name: str) -> bool:
+    return bool(_NON_RUSSIAN_RE.search(name or ""))
+
+
 # --- discovery -------------------------------------------------------------
 
 
@@ -114,7 +117,6 @@ class TeacherEntry:
 
 
 def discover_options_shallow(service, root_folder_id: str) -> list[TeacherEntry]:
-    """Walk down to teacher folders only (skip PDFs). Cheap pre-Import discovery."""
     entries: list[TeacherEntry] = []
     for sector in drive.list_subfolders(service, root_folder_id):
         try:
@@ -257,12 +259,8 @@ class ImportSummary:
     students_created: int = 0
     students_skipped_dupes: int = 0
     students_flagged_for_review: int = 0
+    names_translated: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def _cohort_key(r: WalkResult) -> tuple:
-    return (r.school, r.teacher, r.class_number, r.class_letter,
-            r.language, r.grade)
 
 
 def _folder_url(folder: Optional[dict]) -> str:
@@ -279,15 +277,13 @@ def scan_and_import_root(
     test_date: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
     filters: Optional[dict] = None,
+    owner_user_id: Optional[int] = None,
 ) -> ImportSummary:
-    """Walk the tree (with optional filters), create cohorts/students.
+    """Walk the tree (with optional filters) and create cohorts/students.
 
-    DEDUPLICATION:
-    - Cohorts: per (school, teacher, class_number, class_letter, language, grade).
-    - Students: per (cohort_id, gdrive_file_id).
-
-    Имена сохраняются как есть из имени PDF-файла. Никакой транслитерации
-    больше нет.
+    stage14: owner_user_id передаётся в db.create_cohort. Legacy-cohorts без
+    владельца, которые «реактивируются» этим импортом, тоже получают владельца
+    (через set_cohort_owner) — иначе они останутся видимыми всем.
     """
     if test_date is None:
         test_date = date.today().isoformat()
@@ -299,21 +295,20 @@ def scan_and_import_root(
 
     summary = ImportSummary()
 
-    # Phase 1: walk
     _progress("walking", 0, 0)
     results: list[WalkResult] = []
     for r in walk_root(service, root_folder_id, filters=filters):
         results.append(r)
         _progress("walking", len(results), len(results))
 
-    # Phase 2: write to DB
     cohort_cache: dict[tuple, int] = {}
     existing: dict[tuple, int] = {}
+    existing_owners: dict[int, Optional[int]] = {}
     for c in db.list_cohorts():
-        existing[(
-            c["school"], c["teacher"], c["class_number"], c["class_letter"],
-            c["language"], c["grade"],
-        )] = c["id"]
+        key = (c["school"], c["teacher"], c["class_number"], c["class_letter"],
+               c["language"], c["grade"])
+        existing[key] = c["id"]
+        existing_owners[c["id"]] = c.get("owner_user_id")
 
     reactivated_ids: set[int] = set()
 
@@ -325,6 +320,12 @@ def scan_and_import_root(
             db.reactivate_cohort(cid)
         except AttributeError:
             pass
+        # stage14: если у legacy-cohort нет владельца — назначаем текущего.
+        if owner_user_id is not None and not existing_owners.get(cid):
+            try:
+                db.set_cohort_owner(cid, owner_user_id)
+            except AttributeError:
+                pass
 
     def _get_or_create_cohort(result: WalkResult, class_number: int, class_letter: str) -> int:
         key = (
@@ -340,6 +341,7 @@ def scan_and_import_root(
                 class_number=class_number, class_letter=class_letter,
                 language=result.language, test_date=test_date, grade=result.grade,
                 in_project=1 if result.in_project is None else int(bool(result.in_project)),
+                owner_user_id=owner_user_id,
             )
             summary.cohorts_created += 1
         else:
@@ -382,7 +384,6 @@ def scan_and_import_root(
             summary.errors.append(f"[pdf] {result.pdf_file.get('name')}: {result.error}")
             continue
 
-        # Happy path
         cohort_id = _get_or_create_cohort(result, result.class_number, result.class_letter)
         student_id = _create_student_if_new(cohort_id, result.pdf_file)
         if student_id is None:
