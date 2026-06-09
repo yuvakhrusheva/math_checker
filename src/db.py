@@ -1,17 +1,13 @@
-"""SQLAlchemy-based database layer for math_checker — v3 (stage14).
+"""SQLAlchemy-based database layer for math_checker — v4 (stage16).
 
-stage14 — добавлена изоляция кураторов:
-- В таблице cohorts появилось поле owner_user_id (nullable, FK на users.id).
-- При импорте/создании когорт оно проставляется автоматически (id куратора,
-  который сделал импорт).
-- Новые функции list_cohorts_for_user / list_requires_review_for_user /
-  set_cohort_owner — для UI с фильтрацией.
-- Для admin фильтр не применяется (он видит всё).
-- Когорты с owner_user_id IS NULL (созданные ДО миграции) видят:
-    - admin (всё);
-    - любой curator (наследие, чтобы старые когорты не потерялись).
-  Если хочешь жёсткой изоляции — после миграции пройдись по cohorts и
-  расставь owner_user_id вручную (см. ИНСТРУКЦИЯ).
+stage16 — ОПТИМИЗАЦИЯ для большой БД (68 когорт / 1300+ студентов):
+- Новая функция `get_cohort_overview_for_user` — один SQL-запрос с
+  JOIN cohorts × students + агрегация (COUNT по статусам). Раньше для
+  каждой когорты делалось 3 отдельных запроса (list_students_by_cohort
+  + count_unfinished_in_cohort + list_failed_students_in_cohort) =
+  N × 3 = 200+ запросов в БД на каждый рендер главной страницы.
+
+Все старые функции сохранены — другие страницы / скрипты не ломаются.
 """
 import os
 import sqlite3
@@ -19,7 +15,7 @@ from pathlib import Path
 
 from sqlalchemy import (
     MetaData, Table, Column, Integer, String, Float, ForeignKey, DateTime, text, inspect,
-    CheckConstraint, UniqueConstraint,
+    CheckConstraint, UniqueConstraint, func, case, and_, or_,
     create_engine, insert, select, update, text,
 )
 
@@ -128,7 +124,6 @@ cohorts = Table(
     Column("test_date", String, nullable=False),
     Column("grade", Integer, nullable=False),
     Column("status", String, nullable=False, server_default="pending"),
-    # NEW: stage14 — какой куратор создал когорту (для изоляции в UI).
     Column("owner_user_id", Integer, ForeignKey("users.id"), nullable=True),
     CheckConstraint("language IN ('ru', 'az')", name="ck_cohorts_language"),
     CheckConstraint("grade IN (2, 3)", name="ck_cohorts_grade"),
@@ -152,9 +147,6 @@ students_t = Table(
     Column("created_at", String, server_default=text("CURRENT_TIMESTAMP")),
     Column("reviewed_by", String),
     Column("reviewed_at", DateTime),
-    # NEW: stage14 — флаг «скан повёрнут на 180°». Если true, при следующем
-    # рендере (Pass 1 LLM или Review Panel) страница будет перевёрнута. Куратор
-    # выставляет руками, если LLM явно читает скан вверх ногами.
     Column("rotate_180", Integer, nullable=False, server_default="0"),
     CheckConstraint(
         "status IN ('pending', 'processing', 'processed', "
@@ -233,7 +225,6 @@ def _ensure_reviewed_columns(engine) -> None:
 
 
 def _ensure_owner_column(engine) -> None:
-    """stage14: add cohorts.owner_user_id (nullable INT)."""
     insp = inspect(engine)
     if not insp.has_table("cohorts"):
         return
@@ -244,7 +235,6 @@ def _ensure_owner_column(engine) -> None:
 
 
 def _ensure_rotate_180_column(engine) -> None:
-    """stage14: add students.rotate_180 (INT, default 0)."""
     insp = inspect(engine)
     if not insp.has_table("students"):
         return
@@ -254,6 +244,29 @@ def _ensure_rotate_180_column(engine) -> None:
             conn.execute(text(
                 "ALTER TABLE students ADD COLUMN rotate_180 INTEGER NOT NULL DEFAULT 0"
             ))
+
+
+def _ensure_indexes(engine) -> None:
+    """stage16: индексы для быстрых выборок.
+
+    students.cohort_id — самый частый JOIN/фильтр.
+    students.status — часто фильтруем по статусу.
+    cohorts.owner_user_id — для изоляции кураторов.
+    """
+    dialect = engine.dialect.name
+    statements = [
+        "CREATE INDEX IF NOT EXISTS ix_students_cohort_id ON students (cohort_id)",
+        "CREATE INDEX IF NOT EXISTS ix_students_status ON students (status)",
+        "CREATE INDEX IF NOT EXISTS ix_cohorts_owner ON cohorts (owner_user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_results_student ON task_results (student_id)",
+    ]
+    with engine.begin() as conn:
+        for s in statements:
+            try:
+                conn.execute(text(s))
+            except Exception:
+                # некоторые диалекты могут не поддерживать IF NOT EXISTS — пропускаем тихо
+                pass
 
 
 def init_db() -> None:
@@ -266,6 +279,7 @@ def init_db() -> None:
     _ensure_reviewed_columns(engine)
     _ensure_owner_column(engine)
     _ensure_rotate_180_column(engine)
+    _ensure_indexes(engine)
 
 
 # ---------------------------------------------------------------------------
@@ -284,14 +298,8 @@ def _dialect_insert(table_):
 
 
 def _cohort_visibility_filter(user_id: int | None, role: str | None):
-    """Build a SQLAlchemy WHERE expr that limits cohorts to a curator's own + legacy.
-
-    - admin / None role → return None (no filter)
-    - curator → owner_user_id == user_id OR owner_user_id IS NULL (legacy)
-    """
     if role == "admin" or user_id is None:
         return None
-    from sqlalchemy import or_
     return or_(
         cohorts.c.owner_user_id == user_id,
         cohorts.c.owner_user_id.is_(None),
@@ -344,10 +352,6 @@ def list_cohorts() -> list:
 
 
 def list_cohorts_for_user(user_id: int | None, role: str | None) -> list:
-    """stage14: список когорт для UI с учётом видимости куратора.
-
-    admin → все. curator → owner_user_id == user_id ИЛИ NULL (legacy).
-    """
     stmt = select(cohorts).order_by(cohorts.c.created_at.desc())
     flt = _cohort_visibility_filter(user_id, role)
     if flt is not None:
@@ -356,13 +360,78 @@ def list_cohorts_for_user(user_id: int | None, role: str | None) -> list:
         return conn.execute(stmt).mappings().all()
 
 
-def get_next_pending_cohort():
-    """Очередь — глобальная (любой может запустить, обработает всё подряд).
+def get_cohort_overview_for_user(user_id: int | None, role: str | None) -> list[dict]:
+    """ONE QUERY: вернуть когорты + агрегаты по студентам.
 
-    Изоляция в stage14 — только на видимость в UI, обработка остаётся общей,
-    чтобы один куратор мог запустить очередь на всех. Если когда-нибудь
-    нужно сделать обработку «только своих» — добавь сюда owner_user_id фильтр.
+    Для каждой когорты:
+      - total: всего студентов;
+      - processed_or_terminal: со статусом processed / requires_review /
+        unreadable / error (= «больше не в очереди»);
+      - n_unfinished: pending / processing / requires_review-с-error;
+      - n_failed: requires_review с error_message (для отдельного списка
+        «работы с проблемами» в expander).
+
+    Это заменяет N × {list_students_by_cohort, count_unfinished_in_cohort,
+    list_failed_students_in_cohort} = N × 3 = 204 запроса при 68 когортах.
     """
+    is_terminal = students_t.c.status.in_(
+        ("processed", "requires_review", "unreadable", "error")
+    )
+    is_unfinished = or_(
+        students_t.c.status.in_(("error", "processing", "pending")),
+        and_(
+            students_t.c.status == "requires_review",
+            students_t.c.error_message.isnot(None),
+        ),
+    )
+    is_failed = or_(
+        students_t.c.status.in_(("error", "processing")),
+        and_(
+            students_t.c.status == "requires_review",
+            students_t.c.error_message.isnot(None),
+        ),
+    )
+
+    overview_stmt = (
+        select(
+            cohorts.c.id.label("id"),
+            cohorts.c.created_at,
+            cohorts.c.gdrive_folder_url, cohorts.c.gdrive_folder_id,
+            cohorts.c.school, cohorts.c.teacher,
+            cohorts.c.class_number, cohorts.c.class_letter,
+            cohorts.c.in_project, cohorts.c.language,
+            cohorts.c.test_date, cohorts.c.grade,
+            cohorts.c.status, cohorts.c.owner_user_id,
+            func.count(students_t.c.id).label("total"),
+            func.sum(case((is_terminal, 1), else_=0)).label("processed_or_terminal"),
+            func.sum(case((is_unfinished, 1), else_=0)).label("n_unfinished"),
+            func.sum(case((is_failed, 1), else_=0)).label("n_failed"),
+        )
+        .select_from(cohorts.outerjoin(students_t, students_t.c.cohort_id == cohorts.c.id))
+        .group_by(cohorts.c.id)
+        .order_by(cohorts.c.created_at.desc())
+    )
+
+    flt = _cohort_visibility_filter(user_id, role)
+    if flt is not None:
+        overview_stmt = overview_stmt.where(flt)
+
+    with get_engine().connect() as conn:
+        rows = conn.execute(overview_stmt).mappings().all()
+
+    return [
+        {
+            **dict(r),
+            "total": int(r["total"] or 0),
+            "processed_or_terminal": int(r["processed_or_terminal"] or 0),
+            "n_unfinished": int(r["n_unfinished"] or 0),
+            "n_failed": int(r["n_failed"] or 0),
+        }
+        for r in rows
+    ]
+
+
+def get_next_pending_cohort():
     with get_engine().connect() as conn:
         return conn.execute(
             select(cohorts)
@@ -405,11 +474,6 @@ def update_cohort_metadata(cohort_id: int, **fields) -> None:
 
 
 def set_cohort_owner(cohort_id: int, owner_user_id: int | None) -> None:
-    """stage14: проставить владельца когорты (без проверки статуса).
-
-    Используется и при импорте (drive_walker), и админом для ручной
-    переустановки владельца через psql.
-    """
     with get_engine().begin() as conn:
         conn.execute(
             update(cohorts).where(cohorts.c.id == cohort_id).values(
@@ -474,7 +538,6 @@ def update_student_recognized_name(student_id: int, name: str) -> None:
 
 
 def update_student_rotation(student_id: int, rotate_180: bool) -> None:
-    """stage14: проставить флаг «скан повёрнут на 180°»."""
     with get_engine().begin() as conn:
         conn.execute(
             update(students_t)
@@ -493,7 +556,6 @@ def list_requires_review() -> list:
 
 
 def list_requires_review_for_user(user_id: int | None, role: str | None) -> list:
-    """stage14: список работ на проверку, отфильтрованный по владельцу когорты."""
     flt = _cohort_visibility_filter(user_id, role)
     if flt is None:
         return list_requires_review()
@@ -532,7 +594,6 @@ def mark_student_reviewed(student_id: int, reviewed_by: str | None = None) -> No
 
 
 def reset_unfinished_students_in_cohort(cohort_id: int) -> int:
-    from sqlalchemy import or_, and_
     with get_engine().begin() as conn:
         res = conn.execute(
             update(students_t)
@@ -562,7 +623,6 @@ def reset_failed_students_in_cohort(cohort_id: int) -> int:
 
 
 def list_failed_students_in_cohort(cohort_id: int) -> list:
-    from sqlalchemy import or_, and_
     with get_engine().connect() as conn:
         return list(
             conn.execute(
@@ -583,7 +643,6 @@ def list_failed_students_in_cohort(cohort_id: int) -> list:
 
 
 def count_unfinished_in_cohort(cohort_id: int) -> int:
-    from sqlalchemy import or_, and_, func
     with get_engine().connect() as conn:
         row = conn.execute(
             select(func.count(students_t.c.id))
@@ -619,11 +678,6 @@ def reactivate_cohort(cohort_id: int) -> None:
 
 
 def reset_student_for_reprocessing(student_id: int) -> None:
-    """Полностью очистить студента, чтобы его прогнали через ИИ заново.
-
-    Удаляет все task_results, сбрасывает status='pending', обнуляет
-    error_message и review_status. detected_variant НЕ трогаем.
-    """
     with get_engine().begin() as conn:
         conn.execute(
             task_results.delete().where(task_results.c.student_id == student_id)
@@ -666,21 +720,14 @@ def stamp_reviewer_by_result(result_id: int, reviewed_by: str) -> None:
 
 def get_review_stats(date_from: str | None = None, date_to: str | None = None,
                      user_id: int | None = None, role: str | None = None) -> list[dict]:
-    """Статистика «кто сколько проверил».
-
-    stage14: для curator можно ограничить статистику его собственными работами
-    (по cohorts.owner_user_id). admin видит всё.
-    """
-    from sqlalchemy import func, case, distinct, or_
+    from sqlalchemy import distinct
     conds = [students_t.c.reviewed_by.isnot(None)]
     if date_from:
         conds.append(students_t.c.reviewed_at >= f"{date_from} 00:00:00")
     if date_to:
         conds.append(students_t.c.reviewed_at <= f"{date_to} 23:59:59")
 
-    use_join = False
-    if role != "admin" and user_id is not None:
-        use_join = True
+    use_join = (role != "admin" and user_id is not None)
 
     with get_engine().connect() as conn:
         sl_select_from = students_t.outerjoin(
