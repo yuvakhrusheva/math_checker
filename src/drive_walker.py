@@ -1,12 +1,18 @@
-"""Recursive walk of the root Drive folder + automatic cohort creation — v5 (stage14).
+"""Recursive walk of the root Drive folder + automatic cohort creation — v7 (stage18).
 
-stage14:
-- scan_and_import_root принимает owner_user_id и прокидывает его в
-  db.create_cohort. Когорта получает владельца, который сделал импорт.
-- Если когорта уже существует и владелец не выставлен (legacy) — мы
-  выставляем его текущему импортёру при «реактивации».
-- Перевод имён (translate_names_batch) убран в fixes20; здесь сохранён
-  только needs_translation и парсеры, без LLM-вызовов.
+stage18 — гибкий парсер имён файлов:
+- Принимает варианты: «Имя 2C.pdf», «Имя 2 C.pdf», «Имя 2-C.pdf»,
+  «Имя 2_c.pdf» (с пробелом / дефисом / подчёркиванием между цифрой и
+  буквой класса, любой регистр).
+- Если в имени НЕТ цифры+буквы (только «Имя.pdf») — fallback: берём
+  grade из вложенной папки `grade_folder`, class_letter = "X" (маркер
+  «класс неизвестен», заметный куратору в Cohort Queue).
+- Снимает «(N)»-суффикс копий Drive — как в stage17.
+- Сохраняется backward-compat: parse_student_filename без второго
+  аргумента работает как раньше (raise ValueError на пустом случае).
+
+Логика walk_root тоже подкручена: если class_number/class_letter не
+распознаны, подставляются дефолты из иерархии.
 """
 from __future__ import annotations
 
@@ -71,26 +77,66 @@ def parse_teacher_folder(name: str) -> tuple[str, str, Optional[bool]]:
     return parts[0].strip(), parts[1].strip(), in_project
 
 
+# stage17: убрать " (N)" суффикс копии Drive.
+_COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)(?=\s*\.pdf\s*$)", re.IGNORECASE)
+
+# stage18: гибкий полный матч — имя + цифра + опц. разделитель + буква.
 _STUDENT_FILENAME_RE = re.compile(
-    r"^(?P<name>.+?)\s+(?P<num>\d+)(?P<letter>\S+?)\s*\.pdf\s*$",
+    r"^(?P<name>.+?)\s+(?P<num>\d+)[\s\-_]*(?P<letter>[A-Za-zА-Яа-я])"
+    r"[A-Za-zА-Яа-я0-9]*\s*\.pdf\s*$",
     re.IGNORECASE,
 )
 
+# stage18: fallback — просто «Имя Фамилия.pdf» без класса в имени.
+_NAME_ONLY_RE = re.compile(r"^(?P<name>.+?)\s*\.pdf\s*$", re.IGNORECASE)
 
-def parse_student_filename(filename: str) -> tuple[str, int, str]:
+
+# Маркер «класс из имени файла не извлечён». Используется как class_letter,
+# когда в имени нет «2C»-маркера. Куратор видит когорту «2X» / «3X» и
+# понимает, что нужно проверить и при желании переименовать класс.
+UNKNOWN_CLASS_LETTER = "X"
+
+
+def parse_student_filename(
+    filename: str,
+    default_class_number: int | None = None,
+    default_class_letter: str | None = None,
+) -> tuple[str, int, str]:
+    """Распарсить имя PDF-файла студента.
+
+    Принимает варианты:
+      - «Имя Фамилия 2C.pdf» — стандарт
+      - «Имя Фамилия 2 c.pdf» / «Имя 2-С.pdf» / «Имя 2_c.pdf» — пробел/дефис/подчёрк.
+      - «Имя Фамилия.pdf» — только при заданных default_class_number/letter
+        (берётся из вложенной папки grade_folder).
+
+    Без default — поведение как раньше: raise ValueError, если класс
+    в имени не виден.
+    """
     raw = (filename or "").strip()
+    # Снять " (N)" суффикс копии.
+    raw = _COPY_SUFFIX_RE.sub("", raw)
+
     m = _STUDENT_FILENAME_RE.match(raw)
-    if not m:
-        raise ValueError(f"Cannot parse student PDF filename: {filename!r}.")
-    name = m.group("name").strip()
-    num = int(m.group("num"))
-    letter = m.group("letter").rstrip(".").strip()
-    if not letter:
-        raise ValueError(f"Cannot parse class letter from filename: {filename!r}.")
-    return name, num, letter
+    if m:
+        name = m.group("name").strip()
+        num = int(m.group("num"))
+        letter = m.group("letter").upper().strip()
+        if name and letter:
+            return name, num, letter
+
+    # Fallback: имя без класса. Допускаем, только если есть дефолт.
+    if default_class_number is not None and default_class_letter:
+        m2 = _NAME_ONLY_RE.match(raw)
+        if m2:
+            name = m2.group("name").strip()
+            if name:
+                return name, int(default_class_number), str(default_class_letter)
+
+    raise ValueError(f"Cannot parse student PDF filename: {filename!r}.")
 
 
-# fixes20: translation removed — функция оставлена no-op для совместимости.
+# fixes20: translation removed.
 _NON_RUSSIAN_RE = re.compile(r"[A-Za-zƏəÜüÖöÇçŞşĞğıİ]")
 
 
@@ -172,6 +218,9 @@ class WalkResult:
     class_number: Optional[int] = None
     class_letter: Optional[str] = None
 
+    # stage18: помечаем, был ли использован fallback (UNKNOWN_CLASS_LETTER).
+    class_was_unknown: bool = False
+
     error: Optional[str] = None
     error_at: Optional[str] = None
 
@@ -238,7 +287,11 @@ def walk_root(
                         school=school, teacher=teacher, in_project=in_project,
                     )
                     try:
-                        student_name, class_num, class_letter = parse_student_filename(pdf["name"])
+                        student_name, class_num, class_letter = parse_student_filename(
+                            pdf["name"],
+                            default_class_number=grade,
+                            default_class_letter=UNKNOWN_CLASS_LETTER,
+                        )
                     except ValueError as exc:
                         yield WalkResult(error=str(exc), error_at="pdf", **base)
                         continue
@@ -246,6 +299,7 @@ def walk_root(
                         student_name=student_name,
                         class_number=class_num,
                         class_letter=class_letter,
+                        class_was_unknown=(class_letter == UNKNOWN_CLASS_LETTER),
                         **base,
                     )
 
@@ -259,6 +313,7 @@ class ImportSummary:
     students_created: int = 0
     students_skipped_dupes: int = 0
     students_flagged_for_review: int = 0
+    students_unknown_class: int = 0
     names_translated: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -279,12 +334,6 @@ def scan_and_import_root(
     filters: Optional[dict] = None,
     owner_user_id: Optional[int] = None,
 ) -> ImportSummary:
-    """Walk the tree (with optional filters) and create cohorts/students.
-
-    stage14: owner_user_id передаётся в db.create_cohort. Legacy-cohorts без
-    владельца, которые «реактивируются» этим импортом, тоже получают владельца
-    (через set_cohort_owner) — иначе они останутся видимыми всем.
-    """
     if test_date is None:
         test_date = date.today().isoformat()
 
@@ -320,7 +369,6 @@ def scan_and_import_root(
             db.reactivate_cohort(cid)
         except AttributeError:
             pass
-        # stage14: если у legacy-cohort нет владельца — назначаем текущего.
         if owner_user_id is not None and not existing_owners.get(cid):
             try:
                 db.set_cohort_owner(cid, owner_user_id)
@@ -373,6 +421,8 @@ def scan_and_import_root(
             continue
 
         if result.error and result.error_at == "pdf":
+            # stage18: после fallback такое срабатывает редко, но возможно
+            # (например, если .pdf вообще не в конце имени).
             cohort_id = _get_or_create_cohort(result, result.grade, "?")
             student_id = _create_student_if_new(cohort_id, result.pdf_file)
             if student_id is not None:
@@ -395,6 +445,8 @@ def scan_and_import_root(
             except AttributeError:
                 pass
         summary.students_created += 1
+        if result.class_was_unknown:
+            summary.students_unknown_class += 1
 
     _progress("saving", len(results), len(results))
     return summary
