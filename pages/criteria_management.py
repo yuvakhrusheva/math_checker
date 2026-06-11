@@ -3,6 +3,10 @@ import streamlit as st
 import pandas as pd
 
 from src.criteria_loader import save_criteria_file, list_available_combinations
+import src.auth as auth
+
+# Защита: страница доступна только залогиненным пользователям.
+auth.require_login()
 
 
 st.title("📋 Criteria Management")
